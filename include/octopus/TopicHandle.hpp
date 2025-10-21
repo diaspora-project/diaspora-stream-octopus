@@ -25,7 +25,7 @@ class OctopusTopicHandle final : public diaspora::TopicHandleInterface,
     const diaspora::Validator                  m_validator;
     const diaspora::PartitionSelector          m_partition_selector;
     const diaspora::Serializer                 m_serializer;
-    const std::shared_ptr<OctopusDriver>        m_driver;
+    const std::shared_ptr<OctopusDriver>       m_driver;
 
     Partition                                  m_partition;
     bool                                       m_is_complete = false;

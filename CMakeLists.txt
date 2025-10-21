@@ -56,8 +56,9 @@ if (CMAKE_BUILD_TYPE MATCHES "RelWithDebInfo|Debug")
     )
 endif ()
 
-# search for diaspora-stream-api
 find_package (diaspora-stream-api REQUIRED)
+find_package (PkgConfig REQUIRED)
+pkg_check_modules (RDKAFKA REQUIRED IMPORTED_TARGET rdkafka++ rdkafka)
 
 add_subdirectory (src)
 
