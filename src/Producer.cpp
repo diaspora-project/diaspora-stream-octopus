@@ -1,19 +1,19 @@
 #include "FutureState.hpp"
-#include "AAA/Producer.hpp"
-#include "AAA/TopicHandle.hpp"
+#include "octopus/Producer.hpp"
+#include "octopus/TopicHandle.hpp"
 #include <diaspora/BufferWrapperArchive.hpp>
 
-namespace BBB {
+namespace octopus {
 
-std::shared_ptr<diaspora::TopicHandleInterface> CCCProducer::topic() const {
+std::shared_ptr<diaspora::TopicHandleInterface> OctopusProducer::topic() const {
     return m_topic;
 }
 
-void CCCProducer::flush() {
+void OctopusProducer::flush() {
 
 }
 
-diaspora::Future<diaspora::EventID> CCCProducer::push(
+diaspora::Future<diaspora::EventID> OctopusProducer::push(
         diaspora::Metadata metadata,
         diaspora::DataView data,
         std::optional<size_t> partition) {

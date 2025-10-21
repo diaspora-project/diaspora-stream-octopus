@@ -1,5 +1,5 @@
-#ifndef DDD_THREAD_POOL_HPP
-#define DDD_THREAD_POOL_HPP
+#ifndef OCTOPUS_THREAD_POOL_HPP
+#define OCTOPUS_THREAD_POOL_HPP
 
 #include <diaspora/ThreadPool.hpp>
 
@@ -10,9 +10,9 @@
 #include <condition_variable>
 #include <atomic>
 
-namespace BBB {
+namespace octopus {
 
-class CCCThreadPool final : public diaspora::ThreadPoolInterface {
+class OctopusThreadPool final : public diaspora::ThreadPoolInterface {
 
     struct Work {
 
@@ -36,7 +36,7 @@ class CCCThreadPool final : public diaspora::ThreadPoolInterface {
 
     public:
 
-    CCCThreadPool(diaspora::ThreadCount count) {
+    OctopusThreadPool(diaspora::ThreadCount count) {
         m_threads.reserve(count.count);
         for(size_t i = 0; i < count.count; ++i) {
             m_threads.emplace_back([this]() {
@@ -53,7 +53,7 @@ class CCCThreadPool final : public diaspora::ThreadPoolInterface {
         }
     }
 
-    ~CCCThreadPool() {
+    ~OctopusThreadPool() {
         m_must_stop = true;
         m_queue_cv.notify_all();
         for(auto& th : m_threads) th.join();

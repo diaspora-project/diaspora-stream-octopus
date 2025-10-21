@@ -1,0 +1,16 @@
+#
+# mofka-config.cmake.in
+#
+
+set (OCTOPUS_VERSION @OCTOPUS_VERSION@)
+
+@PACKAGE_INIT@
+
+set_and_check (OCTOPUS_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
+
+check_required_components (octopus)
+
+include (CMakeFindDependencyMacro)
+find_dependency (diaspora-stream-api)
+
+include ("${CMAKE_CURRENT_LIST_DIR}/octopus-targets.cmake")

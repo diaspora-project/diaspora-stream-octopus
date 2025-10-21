@@ -1,19 +1,19 @@
-#ifndef DDD_TOPIC_HANDLE_HPP
-#define DDD_TOPIC_HANDLE_HPP
+#ifndef OCTOPUS_TOPIC_HANDLE_HPP
+#define OCTOPUS_TOPIC_HANDLE_HPP
 
 #include <diaspora/TopicHandle.hpp>
 
 #include <vector>
 
-namespace BBB {
+namespace octopus {
 
-class CCCDriver;
+class OctopusDriver;
 
-class CCCTopicHandle final : public diaspora::TopicHandleInterface,
-                             public std::enable_shared_from_this<CCCTopicHandle> {
+class OctopusTopicHandle final : public diaspora::TopicHandleInterface,
+                             public std::enable_shared_from_this<OctopusTopicHandle> {
 
-    friend class CCCProducer;
-    friend class CCCConsumer;
+    friend class OctopusProducer;
+    friend class OctopusConsumer;
 
     struct Partition {
         std::vector<std::vector<char>> metadata;
@@ -25,19 +25,19 @@ class CCCTopicHandle final : public diaspora::TopicHandleInterface,
     const diaspora::Validator                  m_validator;
     const diaspora::PartitionSelector          m_partition_selector;
     const diaspora::Serializer                 m_serializer;
-    const std::shared_ptr<CCCDriver>        m_driver;
+    const std::shared_ptr<OctopusDriver>        m_driver;
 
     Partition                                  m_partition;
     bool                                       m_is_complete = false;
 
     public:
 
-    CCCTopicHandle(
+    OctopusTopicHandle(
         std::string name,
         diaspora::Validator validator,
         diaspora::PartitionSelector partition_selector,
         diaspora::Serializer serializer,
-        std::shared_ptr<CCCDriver> driver)
+        std::shared_ptr<OctopusDriver> driver)
     : m_name{std::move(name)}
     , m_validator(std::move(validator))
     , m_partition_selector(std::move(partition_selector))

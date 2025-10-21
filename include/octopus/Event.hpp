@@ -1,9 +1,9 @@
-#ifndef DDD_EVENT_HPP
-#define DDD_EVENT_HPP
+#ifndef OCTOPUS_EVENT_HPP
+#define OCTOPUS_EVENT_HPP
 
 #include <diaspora/Event.hpp>
 
-namespace BBB {
+namespace octopus {
 
 class SimpleEvent : public diaspora::EventInterface {
 

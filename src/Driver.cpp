@@ -1,7 +1,7 @@
-#include "AAA/Driver.hpp"
+#include "octopus/Driver.hpp"
 
-namespace BBB {
+namespace octopus {
 
-DIASPORA_REGISTER_DRIVER(BBB, BBB, CCCDriver);
+DIASPORA_REGISTER_DRIVER(octopus, octopus, OctopusDriver);
 
 }

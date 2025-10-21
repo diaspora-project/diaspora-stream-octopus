@@ -1,18 +1,18 @@
-#include "AAA/Consumer.hpp"
-#include "AAA/Driver.hpp"
-#include "AAA/TopicHandle.hpp"
-#include "AAA/ThreadPool.hpp"
+#include "octopus/Consumer.hpp"
+#include "octopus/Driver.hpp"
+#include "octopus/TopicHandle.hpp"
+#include "octopus/ThreadPool.hpp"
 
 #include <condition_variable>
 
-namespace BBB {
+namespace octopus {
 
-CCCConsumer::CCCConsumer(
+OctopusConsumer::OctopusConsumer(
         std::string name,
         diaspora::BatchSize batch_size,
         diaspora::MaxNumBatches max_num_batches,
-        std::shared_ptr<CCCThreadPool> thread_pool,
-        std::shared_ptr<CCCTopicHandle> topic,
+        std::shared_ptr<OctopusThreadPool> thread_pool,
+        std::shared_ptr<OctopusTopicHandle> topic,
         diaspora::DataAllocator data_allocator,
         diaspora::DataSelector data_selector)
 : m_name{std::move(name)}
@@ -24,13 +24,13 @@ CCCConsumer::CCCConsumer(
 , m_data_selector{std::move(data_selector)}
 {}
 
-std::shared_ptr<diaspora::TopicHandleInterface> CCCConsumer::topic() const {
+std::shared_ptr<diaspora::TopicHandleInterface> OctopusConsumer::topic() const {
       return m_topic;
 }
 
-void CCCConsumer::unsubscribe() {}
+void OctopusConsumer::unsubscribe() {}
 
-void CCCConsumer::process(
+void OctopusConsumer::process(
         diaspora::EventProcessor processor,
         std::shared_ptr<diaspora::ThreadPoolInterface> threadPool,
         diaspora::NumEvents maxEvents) {
@@ -58,9 +58,9 @@ void CCCConsumer::process(
     while(pending_events) pending_cv.wait(lock);
 }
 
-diaspora::Future<diaspora::Event> CCCConsumer::pull() {
+diaspora::Future<diaspora::Event> OctopusConsumer::pull() {
     // TODO
-    throw diaspora::Exception{"CCCConsumer::pull not implemented"};
+    throw diaspora::Exception{"OctopusConsumer::pull not implemented"};
 }
 
 }

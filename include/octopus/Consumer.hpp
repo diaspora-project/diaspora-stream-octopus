@@ -1,20 +1,20 @@
-#ifndef DDD_CONSUMER_HPP
-#define DDD_CONSUMER_HPP
+#ifndef OCTOPUS_CONSUMER_HPP
+#define OCTOPUS_CONSUMER_HPP
 
-#include <AAA/ThreadPool.hpp>
-#include <AAA/TopicHandle.hpp>
+#include <octopus/ThreadPool.hpp>
+#include <octopus/TopicHandle.hpp>
 
 #include <diaspora/Consumer.hpp>
 
-namespace BBB {
+namespace octopus {
 
-class CCCConsumer final : public diaspora::ConsumerInterface {
+class OctopusConsumer final : public diaspora::ConsumerInterface {
 
     const std::string                     m_name;
     const diaspora::BatchSize             m_batch_size;
     const diaspora::MaxNumBatches         m_max_num_batches;
-    const std::shared_ptr<CCCThreadPool>  m_thread_pool;
-    const std::shared_ptr<CCCTopicHandle> m_topic;
+    const std::shared_ptr<OctopusThreadPool>  m_thread_pool;
+    const std::shared_ptr<OctopusTopicHandle> m_topic;
     const diaspora::DataAllocator         m_data_allocator;
     const diaspora::DataSelector          m_data_selector;
 
@@ -22,12 +22,12 @@ class CCCConsumer final : public diaspora::ConsumerInterface {
 
     public:
 
-    CCCConsumer(
+    OctopusConsumer(
         std::string name,
         diaspora::BatchSize batch_size,
         diaspora::MaxNumBatches max_num_batches,
-        std::shared_ptr<CCCThreadPool> thread_pool,
-        std::shared_ptr<CCCTopicHandle> topic,
+        std::shared_ptr<OctopusThreadPool> thread_pool,
+        std::shared_ptr<OctopusTopicHandle> topic,
         diaspora::DataAllocator data_allocator,
         diaspora::DataSelector data_selector);
 

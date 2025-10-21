@@ -5,49 +5,49 @@ file (GLOB src-files "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
 include (CMakePackageConfigHelpers)
 
 # where to install files for "find_package"
-set (AAA-pkg "share/cmake/AAA")
+set (octopus-pkg "share/cmake/octopus")
 
 # set version fo shared library
-set (AAA-vers "${BBB_VERSION_MAJOR}.${BBB_VERSION_MINOR}")
+set (octopus-vers "${octopus_VERSION_MAJOR}.${octopus_VERSION_MINOR}")
 
 # target library
-add_library (BBB ${src-files})
-target_link_libraries (BBB
+add_library (octopus ${src-files})
+target_link_libraries (octopus
     PUBLIC diaspora-stream-api
     PRIVATE coverage_config warnings_config)
-target_include_directories (BBB PUBLIC $<INSTALL_INTERFACE:include>)
-target_include_directories (BBB BEFORE PUBLIC
+target_include_directories (octopus PUBLIC $<INSTALL_INTERFACE:include>)
+target_include_directories (octopus BEFORE PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
-target_include_directories (BBB BEFORE PUBLIC
+target_include_directories (octopus BEFORE PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>)
-set_target_properties (BBB
-    PROPERTIES VERSION ${DDD_VERSION}
-    SOVERSION ${DDD_VERSION_MAJOR})
+set_target_properties (octopus
+    PROPERTIES VERSION ${OCTOPUS_VERSION}
+    SOVERSION ${OCTOPUS_VERSION_MAJOR})
 
 # installation stuff (packaging and install commands)
 write_basic_package_version_file (
-    "AAA-config-version.cmake"
-    VERSION ${DDD_VERSION}
+    "octopus-config-version.cmake"
+    VERSION ${OCTOPUS_VERSION}
     COMPATIBILITY AnyNewerVersion)
 
 # generate our config file for find_package()
 set (INCLUDE_INSTALL_DIR include/)
 set (LIB_INSTALL_DIR lib/)
-configure_package_config_file (AAA-config.cmake.in
-  ${CMAKE_CURRENT_BINARY_DIR}/AAA-config.cmake
+configure_package_config_file (octopus-config.cmake.in
+  ${CMAKE_CURRENT_BINARY_DIR}/octopus-config.cmake
   INSTALL_DESTINATION ${LIB_INSTALL_DIR}/mofka/cmake
   PATH_VARS INCLUDE_INSTALL_DIR)
 
-install (TARGETS BBB
-         EXPORT AAA-targets
+install (TARGETS octopus
+         EXPORT octopus-targets
          ARCHIVE DESTINATION lib
          LIBRARY DESTINATION lib)
-install (EXPORT AAA-targets
-         DESTINATION ${AAA-pkg}
-         FILE "AAA-targets.cmake")
-install (FILES "${CMAKE_CURRENT_BINARY_DIR}/AAA-config.cmake"
-         "${CMAKE_CURRENT_BINARY_DIR}/AAA-config-version.cmake"
-         DESTINATION ${AAA-pkg} )
-install (DIRECTORY ../include/AAA
+install (EXPORT octopus-targets
+         DESTINATION ${octopus-pkg}
+         FILE "octopus-targets.cmake")
+install (FILES "${CMAKE_CURRENT_BINARY_DIR}/octopus-config.cmake"
+         "${CMAKE_CURRENT_BINARY_DIR}/octopus-config-version.cmake"
+         DESTINATION ${octopus-pkg} )
+install (DIRECTORY ../include/octopus
          DESTINATION include
          FILES_MATCHING PATTERN "*.hpp")

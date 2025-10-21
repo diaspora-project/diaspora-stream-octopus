@@ -1,12 +1,12 @@
-#ifndef DDD_FUTURE_STATE_H
-#define DDD_FUTURE_STATE_H
+#ifndef OCTOPUS_FUTURE_STATE_H
+#define OCTOPUS_FUTURE_STATE_H
 
 #include <diaspora/Exception.hpp>
 #include <mutex>
 #include <condition_variable>
 #include <variant>
 
-namespace BBB {
+namespace octopus {
 
 template<typename T>
 struct FutureState {

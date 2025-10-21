@@ -1,18 +1,18 @@
-#ifndef DDD_DRIVER_HPP
-#define DDD_DRIVER_HPP
+#ifndef OCTOPUS_DRIVER_HPP
+#define OCTOPUS_DRIVER_HPP
 
 #include <diaspora/Driver.hpp>
-#include <AAA/ThreadPool.hpp>
-#include <AAA/TopicHandle.hpp>
+#include <octopus/ThreadPool.hpp>
+#include <octopus/TopicHandle.hpp>
 
-namespace BBB {
+namespace octopus {
 
-class CCCDriver : public diaspora::DriverInterface,
-                     public std::enable_shared_from_this<CCCDriver> {
+class OctopusDriver : public diaspora::DriverInterface,
+                     public std::enable_shared_from_this<OctopusDriver> {
 
     std::shared_ptr<diaspora::ThreadPoolInterface> m_default_thread_pool =
-        std::make_shared<CCCThreadPool>(diaspora::ThreadCount{0});
-    std::unordered_map<std::string, std::shared_ptr<CCCTopicHandle>> m_topics;
+        std::make_shared<OctopusThreadPool>(diaspora::ThreadCount{0});
+    std::unordered_map<std::string, std::shared_ptr<OctopusTopicHandle>> m_topics;
 
     public:
 
@@ -29,7 +29,7 @@ class CCCDriver : public diaspora::DriverInterface,
             std::piecewise_construct,
             std::forward_as_tuple(std::string{name}),
             std::forward_as_tuple(
-                std::make_shared<CCCTopicHandle>(
+                std::make_shared<OctopusTopicHandle>(
                     std::string{name},
                     std::move(validator),
                     std::move(selector),
@@ -56,11 +56,11 @@ class CCCDriver : public diaspora::DriverInterface,
     }
 
     std::shared_ptr<diaspora::ThreadPoolInterface> makeThreadPool(diaspora::ThreadCount count) const override {
-        return std::make_shared<CCCThreadPool>(count);
+        return std::make_shared<OctopusThreadPool>(count);
     }
 
     static inline std::shared_ptr<diaspora::DriverInterface> create(const diaspora::Metadata&) {
-        return std::make_shared<CCCDriver>();
+        return std::make_shared<OctopusDriver>();
     }
 };
 
