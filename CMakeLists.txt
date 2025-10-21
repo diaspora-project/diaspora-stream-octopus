@@ -1,0 +1,67 @@
+# (C) 2020 The University of Chicago
+# See COPYRIGHT in top-level directory.
+cmake_minimum_required (VERSION 3.21)
+project (AAA C CXX)
+set (CMAKE_CXX_STANDARD 17)
+set (CMAKE_CXX_STANDARD_REQUIRED ON)
+enable_testing ()
+
+# library version set here (e.g. for shared libs).
+set (DDD_VERSION_MAJOR 0)
+set (DDD_VERSION_MINOR 1)
+set (DDD_VERSION_PATCH 0)
+set (DDD_VERSION
+    "${DDD_VERSION_MAJOR}.${DDD_VERSION_MINOR}.${DDD_VERSION_PATCH}")
+
+add_library (coverage_config INTERFACE)
+add_library (warnings_config INTERFACE)
+
+option (ENABLE_TESTS     "Build tests" OFF)
+option (ENABLE_COVERAGE  "Build with coverage" OFF)
+
+# add our cmake module directory to the path
+set (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
+     "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+# link shared lib with full rpath
+set (CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
+set (CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+# setup cache variables for ccmake
+if (NOT CMAKE_BUILD_TYPE)
+    set (CMAKE_BUILD_TYPE Release
+         CACHE STRING "Choose the type of build." FORCE)
+    set_property (CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
+                  "Debug" "Release" "RelWithDebInfo" "MinSizeRel")
+endif ()
+set (CMAKE_PREFIX_PATH "" CACHE STRING "External dependencies path")
+set (BUILD_SHARED_LIBS "ON" CACHE BOOL "Build a shared library")
+
+if (ENABLE_COVERAGE AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options (coverage_config INTERFACE
+        -O0        # no optimization
+        -g         # generate debug info
+        --coverage # sets all required flags
+    )
+    if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.13)
+        target_link_options (coverage_config INTERFACE --coverage)
+    else ()
+        target_link_libraries (coverage_config INTERFACE --coverage)
+    endif ()
+endif ()
+
+if (CMAKE_BUILD_TYPE MATCHES "RelWithDebInfo|Debug")
+    target_compile_options (warnings_config INTERFACE
+        -Wextra -Wall -Wpedantic
+    )
+endif ()
+
+# search for diaspora-stream-api
+find_package (diaspora-stream-api REQUIRED)
+
+add_subdirectory (src)
+
+if (${ENABLE_TESTS})
+    enable_testing ()
+    add_subdirectory (tests)
+endif (${ENABLE_TESTS})
