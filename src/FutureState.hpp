@@ -14,7 +14,7 @@ struct FutureState {
     std::mutex                           mutex;
     std::condition_variable              cv;
     std::variant<T, diaspora::Exception> value;
-    bool                              is_set = false;
+    bool                                 is_set = false;
 
     template<typename U>
     void set(U u) {
