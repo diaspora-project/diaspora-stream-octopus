@@ -4,6 +4,7 @@ spack:
   - diaspora-stream-api
   - pkg-config
   - librdkafka
+  - uuid
   concretizer:
     unify: true
     reuse: true

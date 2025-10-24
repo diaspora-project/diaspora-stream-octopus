@@ -69,6 +69,10 @@ class KafkaConf {
         return PropertySetter{m_config, std::forward<StringType>(name)};
     }
 
+    auto dup() const {
+        return m_config ? rd_kafka_conf_dup(m_config.get()) : nullptr;
+    }
+
     inline operator rd_kafka_conf_t* () const {
         return m_config.get();
     }

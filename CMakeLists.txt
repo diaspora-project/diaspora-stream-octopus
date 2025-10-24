@@ -59,6 +59,7 @@ endif ()
 find_package (diaspora-stream-api REQUIRED)
 find_package (PkgConfig REQUIRED)
 pkg_check_modules (RDKAFKA REQUIRED IMPORTED_TARGET rdkafka++ rdkafka)
+pkg_check_modules (UUID REQUIRED IMPORTED_TARGET uuid)
 
 add_subdirectory (src)
 
