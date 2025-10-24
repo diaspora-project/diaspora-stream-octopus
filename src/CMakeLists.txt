@@ -13,8 +13,8 @@ set (octopus-vers "${octopus_VERSION_MAJOR}.${octopus_VERSION_MINOR}")
 # target library
 add_library (octopus ${src-files})
 target_link_libraries (octopus
-    PUBLIC diaspora-stream-api
-    PRIVATE coverage_config warnings_config PkgConfig::RDKAFKA PkgConfig::UUID)
+    PUBLIC diaspora-stream-api PkgConfig::RDKAFKA
+    PRIVATE coverage_config warnings_config PkgConfig::UUID)
 target_include_directories (octopus PUBLIC $<INSTALL_INTERFACE:include>)
 target_include_directories (octopus BEFORE PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)

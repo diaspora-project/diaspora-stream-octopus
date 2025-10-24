@@ -4,17 +4,26 @@
 #include <octopus/ThreadPool.hpp>
 #include <octopus/TopicHandle.hpp>
 #include <diaspora/Producer.hpp>
+#include <librdkafka/rdkafka.h>
 
 namespace octopus {
 
 class OctopusProducer final : public diaspora::ProducerInterface {
 
-    const std::string                     m_name;
-    const diaspora::BatchSize             m_batch_size;
-    const diaspora::MaxNumBatches         m_max_num_batches;
-    const diaspora::Ordering              m_ordering;
+    friend class OctopusTopicHandle;
+
+    const std::string                         m_name;
+    const diaspora::BatchSize                 m_batch_size;
+    const diaspora::MaxNumBatches             m_max_num_batches;
+    const diaspora::Ordering                  m_ordering;
     const std::shared_ptr<OctopusThreadPool>  m_thread_pool;
     const std::shared_ptr<OctopusTopicHandle> m_topic;
+    const std::shared_ptr<rd_kafka_t>         m_rk;
+
+    static void MessageDeliveryCallback(
+        rd_kafka_t *rk,
+        const rd_kafka_message_t *rkmessage,
+        void *opaque);
 
     public:
 
@@ -24,13 +33,15 @@ class OctopusProducer final : public diaspora::ProducerInterface {
         diaspora::MaxNumBatches max_num_batches,
         diaspora::Ordering ordering,
         std::shared_ptr<OctopusThreadPool> thread_pool,
-        std::shared_ptr<OctopusTopicHandle> topic)
+        std::shared_ptr<OctopusTopicHandle> topic,
+        std::shared_ptr<rd_kafka_t> rk)
     : m_name{std::move(name)}
     , m_batch_size(batch_size)
     , m_max_num_batches(max_num_batches)
     , m_ordering(ordering)
     , m_thread_pool(std::move(thread_pool))
-    , m_topic(std::move(topic)) {}
+    , m_topic(std::move(topic))
+    , m_rk{std::move(rk)} {}
 
     const std::string& name() const override {
         return m_name;

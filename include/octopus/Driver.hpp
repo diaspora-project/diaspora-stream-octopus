@@ -7,8 +7,12 @@
 
 namespace octopus {
 
+class OctopusTopicHandle;
+
 class OctopusDriver : public diaspora::DriverInterface,
                       public std::enable_shared_from_this<OctopusDriver> {
+
+    friend class OctopusTopicHandle;
 
     std::shared_ptr<diaspora::ThreadPoolInterface> m_default_thread_pool =
         std::make_shared<OctopusThreadPool>(diaspora::ThreadCount{0});

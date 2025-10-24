@@ -2,6 +2,7 @@
 #include "octopus/Driver.hpp"
 #include "octopus/Producer.hpp"
 #include "octopus/Consumer.hpp"
+#include "octopus/KafkaConf.hpp"
 
 namespace octopus {
 
@@ -18,12 +19,29 @@ OctopusTopicHandle::makeProducer(std::string_view name,
         diaspora::Metadata options) {
     (void)options;
     if(!thread_pool) thread_pool = m_driver->makeThreadPool(diaspora::ThreadCount{0});
-    auto simple_thread_pool = std::dynamic_pointer_cast<OctopusThreadPool>(thread_pool);
-    if(!simple_thread_pool)
+    auto pool = std::dynamic_pointer_cast<OctopusThreadPool>(thread_pool);
+    if(!pool)
         throw diaspora::Exception{"ThreadPool should be an instance of OctopusThreadPool"};
+
+    // Create the configuration for the producer
+    KafkaConf kconf{m_driver->m_options};
+    kconf.add(options);
+    rd_kafka_conf_set_dr_msg_cb(kconf, OctopusProducer::MessageDeliveryCallback);
+
+    // Create a producer instance
+    char errstr[512];
+    auto conf = kconf.dup(); // rd_kafka_new will take ownership if successful
+    auto rk = std::shared_ptr<rd_kafka_t>{
+        rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr)),
+        rd_kafka_destroy};
+    if (!rk) {
+        rd_kafka_conf_destroy(conf);
+        throw diaspora::Exception{"Could not create rd_kafka_t instance: " + std::string{errstr}};
+    }
+
     return std::make_shared<OctopusProducer>(
-            std::string{name}, batch_size, max_batch, ordering, simple_thread_pool,
-            shared_from_this());
+            std::string{name}, batch_size, max_batch, ordering, pool,
+            shared_from_this(), std::move(rk));
 }
 
 std::shared_ptr<diaspora::ConsumerInterface>
@@ -38,11 +56,11 @@ OctopusTopicHandle::makeConsumer(std::string_view name,
     (void)options;
     (void)targets;
     if(!thread_pool) thread_pool = m_driver->makeThreadPool(diaspora::ThreadCount{0});
-    auto simple_thread_pool = std::dynamic_pointer_cast<OctopusThreadPool>(thread_pool);
-    if(!simple_thread_pool)
+    auto pool = std::dynamic_pointer_cast<OctopusThreadPool>(thread_pool);
+    if(!pool)
         throw diaspora::Exception{"ThreadPool should be an instance of OctopusThreadPool"};
     return std::make_shared<OctopusConsumer>(
-            std::string{name}, batch_size, max_batch, simple_thread_pool,
+            std::string{name}, batch_size, max_batch, pool,
             shared_from_this(), std::move(data_allocator),
             std::move(data_selector));
 }
