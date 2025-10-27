@@ -5,7 +5,7 @@
 
 namespace octopus {
 
-class SimpleEvent : public diaspora::EventInterface {
+class OctopusEvent : public diaspora::EventInterface {
 
     diaspora::Metadata      m_metadata;
     diaspora::DataView      m_data;
@@ -14,20 +14,20 @@ class SimpleEvent : public diaspora::EventInterface {
 
     public:
 
-    SimpleEvent(diaspora::Metadata metadata,
-                diaspora::DataView data,
-                diaspora::PartitionInfo partition,
-                diaspora::EventID id)
+    OctopusEvent(diaspora::Metadata metadata,
+                 diaspora::DataView data,
+                 diaspora::PartitionInfo partition,
+                 diaspora::EventID id)
     : m_metadata(std::move(metadata))
     , m_data(std::move(data))
     , m_partition(std::move(partition))
     , m_id(id) {}
 
-    diaspora::Metadata metadata() const override {
+    const diaspora::Metadata& metadata() const override {
         return m_metadata;
     }
 
-    diaspora::DataView data() const override {
+    const diaspora::DataView& data() const override {
         return m_data;
     }
 

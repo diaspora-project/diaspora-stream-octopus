@@ -263,12 +263,69 @@ std::shared_ptr<diaspora::TopicHandleInterface> OctopusDriver::openTopic(
     diaspora::Serializer serializer;
     consumeMetadata(name, info_consumer, validator, selector, serializer);
 
+    // Get the number of partitions
+    char errstr[512];
+    auto kconf = KafkaConf{m_options};
+    auto conf = kconf.dup();
+    auto rk = std::shared_ptr<rd_kafka_s>{
+        rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr)),
+        rd_kafka_destroy};
+    if (!rk) {
+        rd_kafka_conf_destroy(conf);
+        throw diaspora::Exception{
+            std::string{"Failed to create Kafka handle: "} + errstr};
+    }
+
+    /* Fetch metadata for the topic */
+    const rd_kafka_metadata_t *metadata;
+    rd_kafka_resp_err_t err = rd_kafka_metadata(
+        rk.get(),                // Kafka handle
+        0,                       // all_topics=0 means only this topic
+        rd_kafka_topic_new(rk.get(), name.data(), nullptr), // topic handle
+        &metadata,               // output pointer
+        5000                     // timeout in ms
+    );
+
+    if (err != RD_KAFKA_RESP_ERR_NO_ERROR)
+        throw diaspora::Exception{
+            std::string{"Failed to get metadata: "} + rd_kafka_err2str(err)};
+
+    auto _metadata = std::shared_ptr<const rd_kafka_metadata_t>{
+        metadata, rd_kafka_metadata_destroy};
+
+    size_t num_partitions = 0;
+
+    /* Extract partition info */
+    if (metadata->topic_cnt == 0) {
+        throw diaspora::Exception{std::string{"Topic \""} + std::string{name} + "\" not found"};
+    } else {
+        const rd_kafka_metadata_topic_t &topic = metadata->topics[0];
+        if (topic.err != RD_KAFKA_RESP_ERR_NO_ERROR) {
+            throw diaspora::Exception{
+                std::string{"Topic metadata error: "} + rd_kafka_err2str(topic.err)};
+        } else {
+            num_partitions = topic.partition_cnt;
+        }
+    }
+
+    std::vector<diaspora::PartitionInfo> targets;
+    targets.reserve(num_partitions);
+    for(size_t i = 0; i < num_partitions; ++i) {
+        targets.emplace_back(
+            nlohmann::json{{"partition_id", i}}
+        );
+    }
+
+    /* Setup the partition selector */
+    selector.setPartitions(targets);
+
     // Create the topic handle
     return std::make_shared<OctopusTopicHandle>(
         std::string{name},
         validator,
         selector,
         serializer,
+        targets,
         const_cast<OctopusDriver*>(this)->shared_from_this());
 }
 

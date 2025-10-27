@@ -90,6 +90,9 @@ OctopusTopicHandle::makeConsumer(std::string_view name,
                   << "(use a MaxNumBatches of 0 to remove this message)" << std::endl;
     }
     kconf["group.id"] = name;
+    kconf["enable.partition.eof"] = "false";
+    kconf["auto.offset.reset"] = "earliest";
+    kconf["topic.metadata.refresh.interval.ms"] = "10000";
 
     // Create a producer instance
     char errstr[512];
@@ -114,6 +117,53 @@ OctopusTopicHandle::makeConsumer(std::string_view name,
             std::string{name}, batch_size, max_batch, pool,
             shared_from_this(), std::move(data_allocator),
             std::move(data_selector), targets, rk);
+}
+
+void OctopusTopicHandle::markAsComplete() {
+
+    auto delivery_cb = [](rd_kafka_t*, const rd_kafka_message_t *rkmessage, void*) {
+        if(!rkmessage) {
+            std::cerr << "Unexpected null rkmessage->_private" << std::endl;
+            return;
+        }
+        auto count = static_cast<std::atomic<size_t>*>(rkmessage->_private);
+        ++(*count);
+    };
+
+    KafkaConf kconf{m_driver->m_options};
+    rd_kafka_conf_set_dr_msg_cb(kconf, delivery_cb);
+
+    // Create a producer instance
+    char errstr[512];
+    auto conf = kconf.dup(); // rd_kafka_new will take ownership if successful
+    auto rk = std::shared_ptr<rd_kafka_t>{
+        rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr)),
+        rd_kafka_destroy};
+    if (!rk) {
+        rd_kafka_conf_destroy(conf);
+        throw diaspora::Exception{"Could not create rd_kafka_t instance: " + std::string{errstr}};
+    }
+
+    static const std::vector<size_t> payload(2, std::numeric_limits<size_t>::max());
+    std::atomic<size_t> delivered = 0;
+
+    // Loop over the partitions and send an "end of topic" message
+    for(size_t p = 0; p < m_pinfo.size(); ++p) {
+        rd_kafka_resp_err_t err = rd_kafka_producev(
+                rk.get(),
+                RD_KAFKA_V_TOPIC(m_name.c_str()),
+                RD_KAFKA_V_VALUE(const_cast<size_t*>(payload.data()), payload.size()*sizeof(payload[0])),
+                RD_KAFKA_V_OPAQUE(&delivered),
+                RD_KAFKA_V_END
+        );
+        if (err) throw diaspora::Exception{
+            "rd_kafka_producev failed: " + std::string{rd_kafka_err2str(err)}};
+    }
+
+    // Wait for delivery
+    while(delivered != m_pinfo.size()) {
+        rd_kafka_poll(rk.get(), 100);
+    }
 }
 
 }

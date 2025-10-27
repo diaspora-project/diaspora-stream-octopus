@@ -3,11 +3,118 @@
 #include "octopus/TopicHandle.hpp"
 #include "octopus/ThreadPool.hpp"
 #include "octopus/KafkaConf.hpp"
+#include "octopus/Event.hpp"
+
+#include <diaspora/BufferWrapperArchive.hpp>
 #include <librdkafka/rdkafka.h>
 
 #include <condition_variable>
 
 namespace octopus {
+
+struct FutureEventState {
+
+    std::shared_ptr<OctopusConsumer>                   consumer;
+    std::variant<diaspora::Event, diaspora::Exception> value;
+    std::atomic<bool>                                  is_set = false;
+
+    FutureEventState(std::shared_ptr<OctopusConsumer> c)
+    : consumer{std::move(c)} {}
+
+    void fetch(int timeout_ms) {
+        if(is_set) return;
+        auto rkmessage = rd_kafka_consumer_poll(consumer->m_rk.get(), timeout_ms);
+        if (!rkmessage) return;
+        auto _rkmessage = std::shared_ptr<rd_kafka_message_s>{
+            rkmessage, rd_kafka_message_destroy};
+        if (rkmessage->err) {
+            if (rkmessage->err == RD_KAFKA_RESP_ERR__FATAL) {
+                char fatal_errstr[512];
+                rd_kafka_resp_err_t ferr = rd_kafka_fatal_error(
+                        consumer->m_rk.get(), fatal_errstr, sizeof(fatal_errstr));
+                value = diaspora::Exception{
+                    std::string{"Kafka error: "} + rd_kafka_err2str(ferr)
+                        +  "(" + fatal_errstr + ")"};
+                is_set = true;
+            } else {
+                return;
+            }
+        }
+        // No error, process the message
+        const char* payload = static_cast<const char*>(rkmessage->payload);
+        auto payload_len = rkmessage->len;
+        if(payload_len < 2*sizeof(size_t)) {
+            value = diaspora::Exception{
+                "Unexpected message size received (payload < 2*sizeof(size_t))"};
+            is_set = true;
+            return;
+        }
+        // Get size of metadata and size of data
+        size_t metadata_size, data_size;
+        std::memcpy(&metadata_size, payload, sizeof(metadata_size));
+        std::memcpy(&data_size, payload+sizeof(metadata_size), sizeof(data_size));
+
+        // Check for an end-of-topic message
+        if(metadata_size == std::numeric_limits<size_t>::max()
+        && data_size == std::numeric_limits<size_t>::max()) {
+            value = diaspora::Event{
+                std::make_shared<OctopusEvent>(
+                    diaspora::Metadata{},
+                    diaspora::DataView{},
+                    diaspora::PartitionInfo{nlohmann::json{{"partition_id", rkmessage->partition}}},
+                    diaspora::NoMoreEvents
+                )};
+            is_set = true;
+            return;
+        }
+
+        if(metadata_size + data_size + 2*sizeof(size_t) != payload_len) {
+            value = diaspora::Exception{
+                "Unexpected message size received (payload size doesn't match"
+                    " declared metadata size and data size)"};
+            is_set = true;
+            return;
+        }
+        try {
+            // Deserialize the metadata
+            auto serializer = consumer->m_topic->serializer();
+            diaspora::BufferWrapperInputArchive archive{
+                std::string_view{payload + 2*sizeof(size_t), metadata_size}};
+            diaspora::Metadata metadata;
+            serializer.deserialize(archive, metadata);
+
+            // Select the data
+            auto& data_selector = consumer->m_data_selector;
+            auto descriptor = diaspora::DataDescriptor{"", data_size};
+            descriptor = data_selector ? data_selector(metadata, descriptor) : diaspora::DataDescriptor{};
+
+            // Copy the data to its final location
+            auto& data_allocator = consumer->m_data_allocator;
+            diaspora::DataView data_view;
+            if(data_allocator) {
+                data_view = data_allocator(metadata, descriptor);
+                auto data_ptr = payload + 2*sizeof(size_t) + metadata_size;
+                data_view.write(data_ptr, data_size);
+            }
+
+            // Get partition info
+            diaspora::PartitionInfo partition_info{
+                nlohmann::json{{"partition_id", rkmessage->partition}}};
+
+            // Create the Event
+            auto event = std::make_shared<octopus::OctopusEvent>(
+                std::move(metadata), std::move(data_view),
+                std::move(partition_info), rkmessage->offset);
+
+            // Assign to the value
+            value = diaspora::Event{std::move(event)};
+
+        } catch(const diaspora::Exception& ex) {
+            value = ex;
+        }
+        is_set = true;
+    }
+};
 
 OctopusConsumer::OctopusConsumer(
         std::string name,
@@ -59,12 +166,12 @@ void OctopusConsumer::process(
                 pending_events += 1;
             }
             threadPool->pushWork([&, event=std::move(event)]() {
-                    processor(event);
-                    std::unique_lock lock{pending_mutex};
-                    pending_events -= 1;
-                    if(pending_events == 0)
-                    pending_cv.notify_all();
-                    });
+                processor(event);
+                std::unique_lock lock{pending_mutex};
+                pending_events -= 1;
+                if(pending_events == 0)
+                pending_cv.notify_all();
+            });
         }
     } catch(const diaspora::StopEventProcessor&) {}
     std::unique_lock lock{pending_mutex};
@@ -72,8 +179,25 @@ void OctopusConsumer::process(
 }
 
 diaspora::Future<diaspora::Event> OctopusConsumer::pull() {
-    // TODO
-    throw diaspora::Exception{"OctopusConsumer::pull not implemented"};
+
+    auto state = std::make_shared<FutureEventState>(shared_from_this());
+
+    auto wait_fn = [state]() -> diaspora::Event {
+        while(!state->is_set) state->fetch(1000);
+        if(std::holds_alternative<diaspora::Event>(state->value))
+            return std::get<diaspora::Event>(state->value);
+        else
+            throw std::get<diaspora::Exception>(state->value);
+    };
+
+    auto test_fn = [state]() -> bool {
+        state->fetch(1);
+        return state->is_set;
+    };
+
+    return diaspora::Future<diaspora::Event>{
+        std::move(wait_fn), std::move(test_fn)
+    };
 }
 
 }

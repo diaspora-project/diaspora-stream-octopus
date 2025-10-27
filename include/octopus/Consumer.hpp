@@ -10,7 +10,11 @@
 
 namespace octopus {
 
+struct FutureEventState;
+
 class OctopusConsumer final : public diaspora::ConsumerInterface {
+
+    friend struct FutureEventState;
 
     const std::string                         m_name;
     const diaspora::BatchSize                 m_batch_size;
@@ -71,6 +75,15 @@ class OctopusConsumer final : public diaspora::ConsumerInterface {
 
     diaspora::Future<diaspora::Event> pull() override;
 
+    std::shared_ptr<OctopusConsumer> shared_from_this() {
+        return std::dynamic_pointer_cast<OctopusConsumer>(
+            diaspora::ConsumerInterface::shared_from_this());
+    }
+
+    std::shared_ptr<OctopusConsumer const> shared_from_this() const {
+        return std::dynamic_pointer_cast<OctopusConsumer const>(
+            diaspora::ConsumerInterface::shared_from_this());
+    }
 };
 
 }

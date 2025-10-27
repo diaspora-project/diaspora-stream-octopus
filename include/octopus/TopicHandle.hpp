@@ -21,14 +21,11 @@ class OctopusTopicHandle final : public diaspora::TopicHandleInterface,
     };
 
     const std::string                          m_name;
-    const std::vector<diaspora::PartitionInfo> m_pinfo = {diaspora::PartitionInfo("{}")};
+    const std::vector<diaspora::PartitionInfo> m_pinfo;
     const diaspora::Validator                  m_validator;
     const diaspora::PartitionSelector          m_partition_selector;
     const diaspora::Serializer                 m_serializer;
     const std::shared_ptr<OctopusDriver>       m_driver;
-
-    Partition                                  m_partition;
-    bool                                       m_is_complete = false;
 
     public:
 
@@ -37,8 +34,10 @@ class OctopusTopicHandle final : public diaspora::TopicHandleInterface,
         diaspora::Validator validator,
         diaspora::PartitionSelector partition_selector,
         diaspora::Serializer serializer,
+        std::vector<diaspora::PartitionInfo> targets,
         std::shared_ptr<OctopusDriver> driver)
     : m_name{std::move(name)}
+    , m_pinfo{std::move(targets)}
     , m_validator(std::move(validator))
     , m_partition_selector(std::move(partition_selector))
     , m_serializer(std::move(serializer))
@@ -67,9 +66,7 @@ class OctopusTopicHandle final : public diaspora::TopicHandleInterface,
         return m_serializer;
     }
 
-    void markAsComplete() override {
-        m_is_complete = true;
-    }
+    void markAsComplete() override;
 
     std::shared_ptr<diaspora::ProducerInterface>
         makeProducer(std::string_view name,
