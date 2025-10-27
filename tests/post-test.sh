@@ -10,7 +10,7 @@ echo "==> Test return $RET"
 KAFKA_CLUSTER_ID=$(<cluster_id.txt)
 rm cluster_id.txt
 
-kafka-get-offsets.sh --bootstrap-server localhost:9092
+#kafka-get-offsets.sh --bootstrap-server localhost:9092
 
 echo "==> Stopping kafka server"
 kafka-server-stop.sh server.properties

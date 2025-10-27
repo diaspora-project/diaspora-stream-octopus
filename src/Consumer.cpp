@@ -2,6 +2,8 @@
 #include "octopus/Driver.hpp"
 #include "octopus/TopicHandle.hpp"
 #include "octopus/ThreadPool.hpp"
+#include "octopus/KafkaConf.hpp"
+#include <librdkafka/rdkafka.h>
 
 #include <condition_variable>
 
@@ -14,7 +16,9 @@ OctopusConsumer::OctopusConsumer(
         std::shared_ptr<OctopusThreadPool> thread_pool,
         std::shared_ptr<OctopusTopicHandle> topic,
         diaspora::DataAllocator data_allocator,
-        diaspora::DataSelector data_selector)
+        diaspora::DataSelector data_selector,
+        const std::vector<size_t>& targets,
+        std::shared_ptr<rd_kafka_t> rk)
 : m_name{std::move(name)}
 , m_batch_size(batch_size)
 , m_max_num_batches(max_num_batches)
@@ -22,13 +26,22 @@ OctopusConsumer::OctopusConsumer(
 , m_topic(std::move(topic))
 , m_data_allocator{std::move(data_allocator)}
 , m_data_selector{std::move(data_selector)}
-{}
+, m_target_partitions{targets}
+, m_rk{std::move(rk)}
+{
+}
+
+OctopusConsumer::~OctopusConsumer() {
+    unsubscribe();
+}
 
 std::shared_ptr<diaspora::TopicHandleInterface> OctopusConsumer::topic() const {
       return m_topic;
 }
 
-void OctopusConsumer::unsubscribe() {}
+void OctopusConsumer::unsubscribe() {
+    rd_kafka_unsubscribe(m_rk.get());
+}
 
 void OctopusConsumer::process(
         diaspora::EventProcessor processor,

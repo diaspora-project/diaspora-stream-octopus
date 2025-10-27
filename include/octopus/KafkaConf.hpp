@@ -39,6 +39,10 @@ class KafkaConf {
         inline void operator=(const std::string& value) {
             *this = value.c_str();
         }
+
+        inline void operator=(std::string_view value) {
+            *this = value.data();
+        }
     };
 
     inline KafkaConf(rd_kafka_conf_t* conf)

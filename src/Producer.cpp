@@ -108,8 +108,9 @@ diaspora::Future<diaspora::EventID> OctopusProducer::push(
                 state->set(ex);
             }
         });
+    auto p = shared_from_this();
     return diaspora::Future<diaspora::EventID>{
-        [state, producer=shared_from_this()] {
+        [state, producer=p] {
             while(!state->test()) {
                 rd_kafka_poll(producer->m_rk.get(), 100);
             }

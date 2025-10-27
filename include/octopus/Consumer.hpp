@@ -6,19 +6,21 @@
 
 #include <diaspora/Consumer.hpp>
 
+#include <librdkafka/rdkafka.h>
+
 namespace octopus {
 
 class OctopusConsumer final : public diaspora::ConsumerInterface {
 
-    const std::string                     m_name;
-    const diaspora::BatchSize             m_batch_size;
-    const diaspora::MaxNumBatches         m_max_num_batches;
+    const std::string                         m_name;
+    const diaspora::BatchSize                 m_batch_size;
+    const diaspora::MaxNumBatches             m_max_num_batches;
     const std::shared_ptr<OctopusThreadPool>  m_thread_pool;
     const std::shared_ptr<OctopusTopicHandle> m_topic;
-    const diaspora::DataAllocator         m_data_allocator;
-    const diaspora::DataSelector          m_data_selector;
-
-    size_t                                m_next_offset = 0;
+    const diaspora::DataAllocator             m_data_allocator;
+    const diaspora::DataSelector              m_data_selector;
+    const std::vector<size_t>                 m_target_partitions;
+    const std::shared_ptr<rd_kafka_t>         m_rk;
 
     public:
 
@@ -29,7 +31,11 @@ class OctopusConsumer final : public diaspora::ConsumerInterface {
         std::shared_ptr<OctopusThreadPool> thread_pool,
         std::shared_ptr<OctopusTopicHandle> topic,
         diaspora::DataAllocator data_allocator,
-        diaspora::DataSelector data_selector);
+        diaspora::DataSelector data_selector,
+        const std::vector<size_t>& targets,
+        std::shared_ptr<rd_kafka_t> rk);
+
+    ~OctopusConsumer();
 
     const std::string& name() const override {
         return m_name;

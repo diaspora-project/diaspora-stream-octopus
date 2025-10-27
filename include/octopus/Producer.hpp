@@ -10,7 +10,7 @@
 namespace octopus {
 
 class OctopusProducer final : public diaspora::ProducerInterface,
-                              private std::enable_shared_from_this<OctopusProducer> {
+                              public std::enable_shared_from_this<OctopusProducer> {
 
     friend class OctopusTopicHandle;
 
@@ -21,9 +21,6 @@ class OctopusProducer final : public diaspora::ProducerInterface,
     const std::shared_ptr<OctopusThreadPool>  m_thread_pool;
     const std::shared_ptr<OctopusTopicHandle> m_topic;
     const std::shared_ptr<rd_kafka_t>         m_rk;
-
-    std::thread       m_polling_thread;
-    std::atomic<bool> m_polling_thread_should_stop = false;
 
     static void MessageDeliveryCallback(
         rd_kafka_t *rk,
