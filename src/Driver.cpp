@@ -43,54 +43,49 @@ void OctopusDriver::createTopic(std::string_view name,
     // Create a producer instance
     char errstr[512];
     auto conf = kconf.dup(); // rd_kafka_new will take ownership if successful
-    auto rk = std::shared_ptr<rd_kafka_t>{
-        rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr)),
-        rd_kafka_destroy};
+    auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
     if (!rk) {
         rd_kafka_conf_destroy(conf);
         throw diaspora::Exception{"Could not create rd_kafka_t instance: " + std::string{errstr}};
     }
+    auto _rk = std::shared_ptr<rd_kafka_t>{rk, rd_kafka_destroy};
 
     // Create the NewTopic object for <name> topic
-    auto new_topic = std::shared_ptr<rd_kafka_NewTopic_s>{
-        rd_kafka_NewTopic_new(name.data(), num_partitions, replication_factor, errstr, sizeof(errstr)),
-        rd_kafka_NewTopic_destroy};
+    auto new_topic = rd_kafka_NewTopic_new(
+        name.data(), num_partitions, replication_factor, errstr, sizeof(errstr));
     if (!new_topic) throw diaspora::Exception{"Failed to create NewTopic object: " + std::string{errstr}};
+    auto _new_topic = std::shared_ptr<rd_kafka_NewTopic_s>{new_topic, rd_kafka_NewTopic_destroy};
 
     // Create the NewTopic object for __info_<name> topic
     auto info_topic_name = "__info_"s + std::string{name};
-    auto new_info_topic = std::shared_ptr<rd_kafka_NewTopic_s>{
-        rd_kafka_NewTopic_new(info_topic_name.data(), 1, replication_factor, errstr, sizeof(errstr)),
-        rd_kafka_NewTopic_destroy};
+    auto new_info_topic =
+        rd_kafka_NewTopic_new(info_topic_name.data(), 1, replication_factor, errstr, sizeof(errstr));
     if (!new_info_topic) throw diaspora::Exception{"Failed to create NewTopic object: " + std::string{errstr}};
+    auto _new_info_topic = std::shared_ptr<rd_kafka_NewTopic_s>{new_info_topic, rd_kafka_NewTopic_destroy};
 
     // Create an admin options object
-    auto admin_options = std::shared_ptr<rd_kafka_AdminOptions_s>{
-        rd_kafka_AdminOptions_new(rk.get(), RD_KAFKA_ADMIN_OP_CREATETOPICS),
-        rd_kafka_AdminOptions_destroy};
+    auto admin_options = rd_kafka_AdminOptions_new(rk, RD_KAFKA_ADMIN_OP_CREATETOPICS);
     if (!admin_options) throw diaspora::Exception{"Failed to create rd_kafka_AdminOptions_t"};
+    auto _admin_options = std::shared_ptr<rd_kafka_AdminOptions_s>{admin_options, rd_kafka_AdminOptions_destroy};
 
     // Create a queue for the result of the operation
-    auto queue = std::shared_ptr<rd_kafka_queue_t>{
-        rd_kafka_queue_new(rk.get()),
-        rd_kafka_queue_destroy};
+    auto queue = std::shared_ptr<rd_kafka_queue_t>{rd_kafka_queue_new(rk), rd_kafka_queue_destroy};
 
     // Initiate the topic creation
-    rd_kafka_NewTopic_t *new_topics[] = {new_topic.get(), new_info_topic.get()};
-    rd_kafka_CreateTopics(rk.get(), new_topics, 2, admin_options.get(), queue.get());
+    rd_kafka_NewTopic_t *new_topics[] = {new_topic, new_info_topic};
+    rd_kafka_CreateTopics(rk, new_topics, 2, admin_options, queue.get());
 
     // Wait for the result for up to 10 seconds
-    auto event = std::shared_ptr<rd_kafka_event_t>{
-        rd_kafka_queue_poll(queue.get(), 10000),
-        rd_kafka_event_destroy};
+    auto event = rd_kafka_queue_poll(queue.get(), 10000);
     if (!event) throw diaspora::Exception{"Timed out waiting for CreateTopics result"};
+    auto _event = std::shared_ptr<rd_kafka_event_t>{event, rd_kafka_event_destroy};
 
     // Check if the event type is CreateTopics result
-    if (rd_kafka_event_type(event.get()) != RD_KAFKA_EVENT_CREATETOPICS_RESULT)
+    if (rd_kafka_event_type(event) != RD_KAFKA_EVENT_CREATETOPICS_RESULT)
         throw diaspora::Exception{"Unexpected event type when waiting for CreateTopics"};
 
     // Extract the result from the event
-    auto result = rd_kafka_event_CreateTopics_result(event.get());
+    auto result = rd_kafka_event_CreateTopics_result(event);
     size_t topic_count;
     auto topics_result = rd_kafka_CreateTopics_result_topics(result, &topic_count);
     if (topic_count != 2)
@@ -109,7 +104,7 @@ void OctopusDriver::createTopic(std::string_view name,
     // Produce the metadata to the info topic
     auto validator_metadata = validator->metadata().json().dump();
     rd_kafka_resp_err_t err = rd_kafka_producev(
-        rk.get(),
+        rk,
         RD_KAFKA_V_TOPIC(info_topic_name.c_str()),
         RD_KAFKA_V_MSGFLAGS(RD_KAFKA_MSG_F_COPY),
         RD_KAFKA_V_VALUE(validator_metadata.data(), validator_metadata.size()),
@@ -121,7 +116,7 @@ void OctopusDriver::createTopic(std::string_view name,
     // Produce the selector metadata
     auto selector_metadata = selector->metadata().json().dump();
     err = rd_kafka_producev(
-        rk.get(),
+        rk,
         RD_KAFKA_V_TOPIC(info_topic_name.c_str()),
         RD_KAFKA_V_MSGFLAGS(RD_KAFKA_MSG_F_COPY),
         RD_KAFKA_V_VALUE(selector_metadata.data(), selector_metadata.size()),
@@ -133,7 +128,7 @@ void OctopusDriver::createTopic(std::string_view name,
     // Produce the serializer metadata
     auto serializer_metadata = serializer->metadata().json().dump();
     err = rd_kafka_producev(
-        rk.get(),
+        rk,
         RD_KAFKA_V_TOPIC(info_topic_name.c_str()),
         RD_KAFKA_V_MSGFLAGS(RD_KAFKA_MSG_F_COPY),
         RD_KAFKA_V_VALUE(serializer_metadata.data(), serializer_metadata.size()),
@@ -143,7 +138,7 @@ void OctopusDriver::createTopic(std::string_view name,
             "Failed to produce serializer metadata: " + std::string{rd_kafka_err2str(err)}};
 
     // Flush the producer to ensure the messages are sent
-    err = rd_kafka_flush(rk.get(), 10000);
+    err = rd_kafka_flush(rk, 10000);
     if (err)
         throw diaspora::Exception{
             "Failed to flush producer: " + std::string{rd_kafka_err2str(err)}};
@@ -165,9 +160,8 @@ std::shared_ptr<diaspora::TopicHandleInterface> OctopusDriver::openTopic(
     char errstr[512];
     auto kconf = KafkaConf{m_options};
     auto conf = kconf.dup();
-    auto rk = std::shared_ptr<rd_kafka_s>{
-        rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr)),
-        rd_kafka_destroy};
+    auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
+    auto _rk = std::shared_ptr<rd_kafka_s>{rk, rd_kafka_destroy};
     if (!rk) {
         rd_kafka_conf_destroy(conf);
         throw diaspora::Exception{
@@ -177,9 +171,9 @@ std::shared_ptr<diaspora::TopicHandleInterface> OctopusDriver::openTopic(
     /* Fetch metadata for the topic */
     const rd_kafka_metadata_t *metadata;
     rd_kafka_resp_err_t err = rd_kafka_metadata(
-        rk.get(),                // Kafka handle
+        rk,                      // Kafka handle
         0,                       // all_topics=0 means only this topic
-        rd_kafka_topic_new(rk.get(), name.data(), nullptr), // topic handle
+        rd_kafka_topic_new(rk, name.data(), nullptr), // topic handle
         &metadata,               // output pointer
         5000                     // timeout in ms
     );
@@ -234,47 +228,44 @@ bool OctopusDriver::topicExists(std::string_view name) const {
 
     auto kconf = KafkaConf{m_options}.dup();
 
-    auto rk = std::shared_ptr<rd_kafka_t>{
-        rd_kafka_new(RD_KAFKA_PRODUCER, kconf, errstr, sizeof(errstr)),
-        rd_kafka_destroy};
+    auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, kconf, errstr, sizeof(errstr));
     if (!rk) {
         rd_kafka_conf_destroy(kconf);
         throw diaspora::Exception{"Could not create rd_kafka_t instance: " + std::string{errstr}};
     }
+    auto _rk = std::shared_ptr<rd_kafka_t>{rk, rd_kafka_destroy};
 
     // Create an admin options object
-    auto admin_options = std::shared_ptr<rd_kafka_AdminOptions_s>{
-        rd_kafka_AdminOptions_new(rk.get(), RD_KAFKA_ADMIN_OP_DESCRIBETOPICS),
-        rd_kafka_AdminOptions_destroy};
+    auto admin_options = rd_kafka_AdminOptions_new(rk, RD_KAFKA_ADMIN_OP_DESCRIBETOPICS);
     if (!admin_options) throw diaspora::Exception{"Failed to create rd_kafka_AdminOptions_t"};
+    auto _admin_options = std::shared_ptr<rd_kafka_AdminOptions_s>{admin_options, rd_kafka_AdminOptions_destroy};
 
     // Create a queue for the result of the operation
     auto queue = std::shared_ptr<rd_kafka_queue_t>{
-        rd_kafka_queue_new(rk.get()),
+        rd_kafka_queue_new(rk),
         rd_kafka_queue_destroy};
 
     // Create a topic collection
     const char* topic_names[] = {name.data(), info_topic_name.data()};
-    auto topic_collection = std::shared_ptr<rd_kafka_TopicCollection_t>{
-        rd_kafka_TopicCollection_of_topic_names(topic_names, 2),
-        rd_kafka_TopicCollection_destroy};
+    auto topic_collection = rd_kafka_TopicCollection_of_topic_names(topic_names, 2);
     if (!topic_collection) throw diaspora::Exception{"Failed to create rd_kafka_TopicCollection_t"};
+    auto _topic_collection = std::shared_ptr<rd_kafka_TopicCollection_t>{
+        topic_collection, rd_kafka_TopicCollection_destroy};
 
     // Initiate the topic description
-    rd_kafka_DescribeTopics(rk.get(), topic_collection.get(), admin_options.get(), queue.get());
+    rd_kafka_DescribeTopics(rk, topic_collection, admin_options, queue.get());
 
     // Wait for the result for up to 10 seconds
-    auto event = std::shared_ptr<rd_kafka_event_t>{
-        rd_kafka_queue_poll(queue.get(), 10000),
-        rd_kafka_event_destroy};
+    auto event = rd_kafka_queue_poll(queue.get(), 10000);
     if (!event) throw diaspora::Exception{"Timed out waiting for DescribeTopics result"};
+    auto _event = std::shared_ptr<rd_kafka_event_t>{event, rd_kafka_event_destroy};
 
     // Check if the event type is DescribeTopics result
-    if (rd_kafka_event_type(event.get()) != RD_KAFKA_EVENT_DESCRIBETOPICS_RESULT)
+    if (rd_kafka_event_type(event) != RD_KAFKA_EVENT_DESCRIBETOPICS_RESULT)
         throw diaspora::Exception{"Unexpected event type when waiting for DescribeTopics"};
 
     // Extract the result from the event
-    auto result = rd_kafka_event_DescribeTopics_result(event.get());
+    auto result = rd_kafka_event_DescribeTopics_result(event);
     size_t topic_count;
     auto topics_result = rd_kafka_DescribeTopics_result_topics(result, &topic_count);
     if (topic_count != 2)

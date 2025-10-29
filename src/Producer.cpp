@@ -7,7 +7,7 @@
 namespace octopus {
 
 struct Message {
- 
+
     using ResultType = std::variant<std::monostate, diaspora::EventID, diaspora::Exception>;
 
     std::vector<char>           payload;

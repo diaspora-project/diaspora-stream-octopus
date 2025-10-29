@@ -32,17 +32,16 @@ OctopusTopicHandle::makeProducer(std::string_view name,
     // Create a producer instance
     char errstr[512];
     auto conf = kconf.dup(); // rd_kafka_new will take ownership if successful
-    auto rk = std::shared_ptr<rd_kafka_t>{
-        rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr)),
-        rd_kafka_destroy};
+    auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
     if (!rk) {
         rd_kafka_conf_destroy(conf);
         throw diaspora::Exception{"Could not create rd_kafka_t instance: " + std::string{errstr}};
     }
+    auto _rk = std::shared_ptr<rd_kafka_t>{rk, rd_kafka_destroy};
 
     return std::make_shared<OctopusProducer>(
             std::string{name}, batch_size, max_batch, ordering, pool,
-            shared_from_this(), std::move(rk));
+            shared_from_this(), std::move(_rk));
 }
 
 std::shared_ptr<diaspora::ConsumerInterface>
@@ -97,17 +96,16 @@ OctopusTopicHandle::makeConsumer(std::string_view name,
     // Create a producer instance
     char errstr[512];
     auto conf = kconf.dup(); // rd_kafka_new will take ownership if successful
-    auto rk = std::shared_ptr<rd_kafka_t>{
-        rd_kafka_new(RD_KAFKA_CONSUMER, conf, errstr, sizeof(errstr)),
-        rd_kafka_destroy};
+    auto rk = rd_kafka_new(RD_KAFKA_CONSUMER, conf, errstr, sizeof(errstr));
     if (!rk) {
         rd_kafka_conf_destroy(conf);
         throw diaspora::Exception{
             "Could not create rd_kafka_t instance: " + std::string{errstr}};
     }
+    auto _rk = std::shared_ptr<rd_kafka_t>{rk, rd_kafka_destroy};
 
     // Subscribe
-    if (rd_kafka_subscribe(rk.get(), topic_list.get()) != RD_KAFKA_RESP_ERR_NO_ERROR) {
+    if (rd_kafka_subscribe(rk, topic_list.get()) != RD_KAFKA_RESP_ERR_NO_ERROR) {
         throw diaspora::Exception{
             std::string{"Failed to subscribe to topic: "}
             + rd_kafka_err2str(rd_kafka_last_error())};
@@ -116,7 +114,7 @@ OctopusTopicHandle::makeConsumer(std::string_view name,
     return std::make_shared<OctopusConsumer>(
             std::string{name}, batch_size, max_batch, pool,
             shared_from_this(), std::move(data_allocator),
-            std::move(data_selector), targets, rk);
+            std::move(data_selector), targets, _rk);
 }
 
 }
