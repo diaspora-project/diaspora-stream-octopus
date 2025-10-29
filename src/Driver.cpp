@@ -1,6 +1,7 @@
 #include "octopus/Driver.hpp"
 #include "octopus/KafkaConf.hpp"
-#include <uuid.h>
+//#include <uuid.h>
+#include "KafkaHelper.hpp"
 #include <algorithm>
 #include <string>
 
@@ -9,109 +10,6 @@ namespace octopus {
 DIASPORA_REGISTER_DRIVER(octopus, octopus, OctopusDriver);
 
 using namespace std::string_literals;
-
-static std::shared_ptr<rd_kafka_t> createInfoConsumer(const std::string& topic_name,
-                                                      KafkaConf conf) {
-    char errstr[512];
-
-    uuid_t consumer_uuid;
-    uuid_generate(consumer_uuid);
-    char group_id[37] = {0};
-    uuid_unparse(consumer_uuid, group_id);
-    conf["group.id"] = std::string{"info-consurmer-"} + group_id;
-    conf["auto.offset.reset"] = "earliest";
-    conf["topic.metadata.refresh.interval.ms"] = "10000";
-
-    auto kconf = conf.dup();
-
-    auto info_consumer = std::shared_ptr<rd_kafka_t>{
-        rd_kafka_new(RD_KAFKA_CONSUMER, kconf, errstr, sizeof(errstr)),
-        rd_kafka_destroy};
-    if (!info_consumer) {
-        rd_kafka_conf_destroy(kconf);
-        throw diaspora::Exception{
-            "Could not create rd_kafka_t instance: " + std::string{errstr}};
-    }
-
-    // Create the topic object
-    auto info_topic = std::shared_ptr<rd_kafka_topic_t>{
-        rd_kafka_topic_new(info_consumer.get(), topic_name.data(), nullptr),
-        rd_kafka_topic_destroy};
-    if (!info_topic)
-        throw diaspora::Exception{
-            "Failed to create topic object: " + std::string{rd_kafka_err2str(rd_kafka_last_error())}};
-
-    // Create a topic partition list
-    auto topic_partition_list = std::shared_ptr<rd_kafka_topic_partition_list_t>{
-        rd_kafka_topic_partition_list_new(1),
-        rd_kafka_topic_partition_list_destroy};
-    if (!topic_partition_list)
-        throw diaspora::Exception{
-            "Failed to create topic partition list: " + std::string{rd_kafka_err2str(rd_kafka_last_error())}};
-
-    // Add the topic to the list
-    rd_kafka_topic_partition_list_add(topic_partition_list.get(), topic_name.data(), RD_KAFKA_PARTITION_UA);
-
-    // Subscribe to the topic
-    rd_kafka_resp_err_t err = rd_kafka_subscribe(info_consumer.get(), topic_partition_list.get());
-    if (err)
-        throw diaspora::Exception{
-            "Failed to subscribe to topic: " + std::string{rd_kafka_err2str(err)}};
-
-    return info_consumer;
-}
-
-static std::string consumeMessage(std::shared_ptr<rd_kafka_t> info_consumer) {
-    rd_kafka_message_t *message;
-    while (true) {
-        message = rd_kafka_consumer_poll(info_consumer.get(), 1000);
-        if (message) {
-            if (message->err) {
-                if (message->err == RD_KAFKA_RESP_ERR__PARTITION_EOF) {
-                    // End of partition, continue polling
-                    rd_kafka_message_destroy(message);
-                    continue;
-                } else {
-                    throw diaspora::Exception{
-                        "Consumer error: " + std::string{rd_kafka_message_errstr(message)}};
-                }
-            } else {
-                // Message received
-                std::string payload(static_cast<char*>(message->payload), message->len);
-                rd_kafka_message_destroy(message);
-                return payload;
-            }
-        } else {
-            // Timeout, continue polling
-            continue;
-        }
-    }
-}
-
-static void consumeMetadata(std::string_view topic_name,
-                            std::shared_ptr<rd_kafka_t> info_consumer,
-                            diaspora::Validator& validator,
-                            diaspora::PartitionSelector& selector,
-                            diaspora::Serializer& serializer) {
-    auto info_topic_name = "__info_"s + std::string{topic_name};
-    // Consume the validator metadata
-    auto validator_metadata = consumeMessage(info_consumer);
-    validator = diaspora::Validator::FromMetadata(
-        diaspora::Metadata{validator_metadata}
-    );
-
-    // Consume the selector metadata
-    auto selector_metadata = consumeMessage(info_consumer);
-    selector = diaspora::PartitionSelector::FromMetadata(
-        diaspora::Metadata{selector_metadata}
-    );
-
-    // Consume the serializer metadata
-    auto serializer_metadata = consumeMessage(info_consumer);
-    serializer = diaspora::Serializer::FromMetadata(
-        diaspora::Metadata{serializer_metadata}
-    );
-}
 
 void OctopusDriver::createTopic(std::string_view name,
                                 const diaspora::Metadata& options,
@@ -255,13 +153,13 @@ std::shared_ptr<diaspora::TopicHandleInterface> OctopusDriver::openTopic(
         std::string_view name) const {
     // Create a consumer for the info topic
     auto info_topic_name = "__info_"s + std::string{name};
-    auto info_consumer = createInfoConsumer(info_topic_name, m_options);
-
-    // Consume the metadata from the info topic
-    diaspora::Validator validator;
-    diaspora::PartitionSelector selector;
-    diaspora::Serializer serializer;
-    consumeMetadata(name, info_consumer, validator, selector, serializer);
+    // Get info from topic
+    auto info_vector = readFullTopic(info_topic_name, m_options);
+    if(info_vector.size() < 3)
+        throw diaspora::Exception{"Information about topic not complete in " + info_topic_name};
+    auto validator = diaspora::Validator::FromMetadata(info_vector[0]);
+    auto selector = diaspora::PartitionSelector::FromMetadata(info_vector[1]);
+    auto serializer = diaspora::Serializer::FromMetadata(info_vector[2]);
 
     // Get the number of partitions
     char errstr[512];

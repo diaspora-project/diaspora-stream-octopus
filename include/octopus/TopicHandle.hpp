@@ -66,8 +66,6 @@ class OctopusTopicHandle final : public diaspora::TopicHandleInterface,
         return m_serializer;
     }
 
-    void markAsComplete() override;
-
     std::shared_ptr<diaspora::ProducerInterface>
         makeProducer(std::string_view name,
                      diaspora::BatchSize batch_size,

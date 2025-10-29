@@ -60,12 +60,12 @@ class OctopusProducer final : public diaspora::ProducerInterface,
 
     std::shared_ptr<diaspora::TopicHandleInterface> topic() const override;
 
-    diaspora::Future<diaspora::EventID> push(
+    diaspora::Future<std::optional<diaspora::EventID>> push(
             diaspora::Metadata metadata,
             diaspora::DataView data,
             std::optional<size_t> partition) override;
 
-    void flush() override;
+    diaspora::Future<std::optional<diaspora::Flushed>> flush() override;
 };
 
 }

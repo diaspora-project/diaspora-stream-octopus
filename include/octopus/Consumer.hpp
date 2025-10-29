@@ -68,12 +68,13 @@ class OctopusConsumer final : public diaspora::ConsumerInterface {
     }
 
     void process(diaspora::EventProcessor processor,
-                 std::shared_ptr<diaspora::ThreadPoolInterface> threadPool,
-                 diaspora::NumEvents maxEvents) override;
+                 int timeout_ms,
+                 diaspora::NumEvents maxEvents,
+                 std::shared_ptr<diaspora::ThreadPoolInterface> threadPool) override;
 
     void unsubscribe() override;
 
-    diaspora::Future<diaspora::Event> pull() override;
+    diaspora::Future<std::optional<diaspora::Event>> pull() override;
 
     std::shared_ptr<OctopusConsumer> shared_from_this() {
         return std::dynamic_pointer_cast<OctopusConsumer>(

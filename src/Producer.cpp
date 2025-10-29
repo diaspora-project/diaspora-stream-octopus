@@ -7,8 +7,11 @@
 namespace octopus {
 
 struct Message {
-    std::vector<char>                               payload;
-    std::shared_ptr<FutureState<diaspora::EventID>> future = std::make_shared<FutureState<diaspora::EventID>>();
+ 
+    using ResultType = std::variant<std::monostate, diaspora::EventID, diaspora::Exception>;
+
+    std::vector<char>           payload;
+    std::shared_ptr<ResultType> result = std::make_shared<ResultType>();
 };
 
 OctopusProducer::OctopusProducer(
@@ -31,13 +34,15 @@ std::shared_ptr<diaspora::TopicHandleInterface> OctopusProducer::topic() const {
     return m_topic;
 }
 
-void OctopusProducer::flush() {
-    while (true) {
-        int remaining = rd_kafka_outq_len(m_rk.get());
-        if (remaining == 0)
-            break;
-        rd_kafka_flush(m_rk.get(), 1000);
-    }
+diaspora::Future<std::optional<diaspora::Flushed>> OctopusProducer::flush() {
+    return {
+        [rk=m_rk](int timeout_ms) -> std::optional<diaspora::Flushed> {
+            rd_kafka_flush(rk.get(), timeout_ms);
+            if(rd_kafka_outq_len(rk.get()) == 0) return diaspora::Flushed{};
+            else return std::nullopt;
+        },
+        [rk=m_rk]() { return rd_kafka_outq_len(rk.get()) == 0; }
+    };
 }
 
 void OctopusProducer::MessageDeliveryCallback(
@@ -53,22 +58,22 @@ void OctopusProducer::MessageDeliveryCallback(
         return;
     }
 
-    msg->future->set(static_cast<diaspora::EventID>(rkmessage->offset));
+    *(msg->result) = static_cast<diaspora::EventID>(rkmessage->offset);
     delete msg;
 }
 
-diaspora::Future<diaspora::EventID> OctopusProducer::push(
+diaspora::Future<std::optional<diaspora::EventID>> OctopusProducer::push(
         diaspora::Metadata metadata,
         diaspora::DataView data,
         std::optional<size_t> partition) {
     auto msg = new Message{};
-    auto state = msg->future;
+    auto result_ptr = msg->result;
     m_thread_pool->pushWork(
             [this, topic=m_topic, msg,
              metadata=std::move(metadata),
              data=std::move(data),
-             partition]() {
-            auto state = msg->future;
+             partition,
+             result_ptr]() {
             try {
                 // validation
                 topic->validator().validate(metadata, data);
@@ -105,18 +110,21 @@ diaspora::Future<diaspora::EventID> OctopusProducer::push(
                 rd_kafka_poll(m_rk.get(), 0);
             } catch(const diaspora::Exception& ex) {
                 delete msg;
-                state->set(ex);
+                *result_ptr = ex;
             }
         });
     auto p = shared_from_this();
-    return diaspora::Future<diaspora::EventID>{
-        [state, producer=p] {
-            while(!state->test()) {
-                rd_kafka_poll(producer->m_rk.get(), 100);
-            }
-            return state->wait();
+    return {
+        [result_ptr, producer=p](int timeout_ms) -> std::optional<diaspora::EventID> {
+            if(std::holds_alternative<std::monostate>(*result_ptr))
+                rd_kafka_poll(producer->m_rk.get(), timeout_ms);
+            if(std::holds_alternative<diaspora::EventID>(*result_ptr))
+                return std::get<diaspora::EventID>(*result_ptr);
+            else if(std::holds_alternative<diaspora::Exception>(*result_ptr))
+                throw std::get<diaspora::Exception>(*result_ptr);
+            else return std::nullopt;
         },
-        [state] { return state->test(); }
+        [result_ptr] { return !std::holds_alternative<std::monostate>(*result_ptr); }
     };
 }
 

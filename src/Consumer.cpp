@@ -14,17 +14,20 @@ namespace octopus {
 
 struct FutureEventState {
 
-    std::shared_ptr<OctopusConsumer>                   consumer;
-    std::variant<diaspora::Event, diaspora::Exception> value;
-    std::atomic<bool>                                  is_set = false;
+    std::shared_ptr<OctopusConsumer>  consumer;
+    std::variant<std::monostate,
+                 diaspora::Event,
+                 diaspora::Exception> value;
 
     FutureEventState(std::shared_ptr<OctopusConsumer> c)
     : consumer{std::move(c)} {}
 
     void fetch(int timeout_ms) {
-        if(is_set) return;
+        if(!std::holds_alternative<std::monostate>(value)) return;
         auto rkmessage = rd_kafka_consumer_poll(consumer->m_rk.get(), timeout_ms);
-        if (!rkmessage) return;
+        if (!rkmessage) {
+            return;
+        }
         auto _rkmessage = std::shared_ptr<rd_kafka_message_s>{
             rkmessage, rd_kafka_message_destroy};
         if (rkmessage->err) {
@@ -35,7 +38,6 @@ struct FutureEventState {
                 value = diaspora::Exception{
                     std::string{"Kafka error: "} + rd_kafka_err2str(ferr)
                         +  "(" + fatal_errstr + ")"};
-                is_set = true;
             } else {
                 return;
             }
@@ -46,7 +48,6 @@ struct FutureEventState {
         if(payload_len < 2*sizeof(size_t)) {
             value = diaspora::Exception{
                 "Unexpected message size received (payload < 2*sizeof(size_t))"};
-            is_set = true;
             return;
         }
         // Get size of metadata and size of data
@@ -64,7 +65,6 @@ struct FutureEventState {
                     diaspora::PartitionInfo{nlohmann::json{{"partition_id", rkmessage->partition}}},
                     diaspora::NoMoreEvents
                 )};
-            is_set = true;
             return;
         }
 
@@ -72,7 +72,6 @@ struct FutureEventState {
             value = diaspora::Exception{
                 "Unexpected message size received (payload size doesn't match"
                     " declared metadata size and data size)"};
-            is_set = true;
             return;
         }
         try {
@@ -94,7 +93,11 @@ struct FutureEventState {
             if(data_allocator) {
                 data_view = data_allocator(metadata, descriptor);
                 auto data_ptr = payload + 2*sizeof(size_t) + metadata_size;
-                data_view.write(data_ptr, data_size);
+                size_t data_view_offset = 0;
+                for(auto& segment : descriptor.flatten()) {
+                    data_view.write(data_ptr + segment.offset, segment.size, data_view_offset);
+                    data_view_offset += segment.size;
+                }
             }
 
             // Get partition info
@@ -112,7 +115,6 @@ struct FutureEventState {
         } catch(const diaspora::Exception& ex) {
             value = ex;
         }
-        is_set = true;
     }
 };
 
@@ -152,15 +154,16 @@ void OctopusConsumer::unsubscribe() {
 
 void OctopusConsumer::process(
         diaspora::EventProcessor processor,
-        std::shared_ptr<diaspora::ThreadPoolInterface> threadPool,
-        diaspora::NumEvents maxEvents) {
+        int timeout_ms,
+        diaspora::NumEvents maxEvents,
+        std::shared_ptr<diaspora::ThreadPoolInterface> threadPool) {
     if(!threadPool) threadPool = m_topic->driver()->defaultThreadPool();
     size_t                  pending_events = 0;
     std::mutex              pending_mutex;
     std::condition_variable pending_cv;
     try {
         for(size_t i = 0; i < maxEvents.value; ++i) {
-            auto event = pull().wait();
+            auto event = pull().wait(timeout_ms);
             {
                 std::unique_lock lock{pending_mutex};
                 pending_events += 1;
@@ -178,24 +181,26 @@ void OctopusConsumer::process(
     while(pending_events) pending_cv.wait(lock);
 }
 
-diaspora::Future<diaspora::Event> OctopusConsumer::pull() {
+diaspora::Future<std::optional<diaspora::Event>> OctopusConsumer::pull() {
 
     auto state = std::make_shared<FutureEventState>(shared_from_this());
 
-    auto wait_fn = [state]() -> diaspora::Event {
-        while(!state->is_set) state->fetch(1000);
+    auto wait_fn = [state](int timeout_ms) -> std::optional<diaspora::Event> {
+        state->fetch(timeout_ms);
         if(std::holds_alternative<diaspora::Event>(state->value))
             return std::get<diaspora::Event>(state->value);
-        else
+        else if(std::holds_alternative<diaspora::Exception>(state->value))
             throw std::get<diaspora::Exception>(state->value);
+        else
+            return std::nullopt;
     };
 
     auto test_fn = [state]() -> bool {
         state->fetch(1);
-        return state->is_set;
+        return !std::holds_alternative<std::monostate>(state->value);
     };
 
-    return diaspora::Future<diaspora::Event>{
+    return diaspora::Future<std::optional<diaspora::Event>>{
         std::move(wait_fn), std::move(test_fn)
     };
 }
