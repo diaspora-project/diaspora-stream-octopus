@@ -6,13 +6,17 @@
 #include <diaspora/Producer.hpp>
 #include <librdkafka/rdkafka.h>
 #include <memory>
+#include <atomic>
 
 namespace octopus {
+
+struct Message;
 
 class OctopusProducer final : public diaspora::ProducerInterface,
                               public std::enable_shared_from_this<OctopusProducer> {
 
     friend class OctopusTopicHandle;
+    friend struct Message;
 
     const std::string                         m_name;
     const diaspora::BatchSize                 m_batch_size;
@@ -26,6 +30,8 @@ class OctopusProducer final : public diaspora::ProducerInterface,
         rd_kafka_t *rk,
         const rd_kafka_message_t *rkmessage,
         void *opaque);
+
+    std::atomic<size_t> m_pending_messages = 0;
 
     public:
 

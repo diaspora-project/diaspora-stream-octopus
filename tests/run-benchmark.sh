@@ -5,7 +5,15 @@ HERE=$(dirname $0)
 $HERE/pre-test.sh
 
 echo "==> Generating configuration for backend"
-echo "{}" > benchmark_config.json
+echo '{"bootstrap.servers":"localhost:9092"}' > benchmark_config.json
+
+echo "==> Creating topic"
+python $HERE/create-topic-for-benchmark.py
+r="$?"
+if [ "$r" -ne "0" ]; then
+    $HERE/post-test.sh $r
+    exit 1
+fi
 
 echo "==> Running producer benchmark"
 diaspora-producer-benchmark -d octopus \
@@ -30,7 +38,7 @@ diaspora-consumer-benchmark -d octopus \
                             -n 100 \
                             -s 0.5 \
                             -i 0.8 \
-                            -p 1
+                            -p 0
 r="$?"
 if [ "$r" -ne "0" ]; then
     $HERE/post-test.sh $r

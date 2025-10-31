@@ -26,6 +26,7 @@ OctopusTopicHandle::makeProducer(std::string_view name,
     KafkaConf kconf{m_driver->m_options};
     kconf.add(options);
     rd_kafka_conf_set_dr_msg_cb(kconf, OctopusProducer::MessageDeliveryCallback);
+    kconf["enable.idempotence"] = "true";
     if(batch_size.value > 0)
         kconf["batch.num.messages"] = std::to_string(std::min<size_t>(1000000ULL, batch_size.value));
 

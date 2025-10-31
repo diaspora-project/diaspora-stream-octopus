@@ -10,8 +10,19 @@ struct Message {
 
     using ResultType = std::variant<std::monostate, diaspora::EventID, diaspora::Exception>;
 
-    std::vector<char>           payload;
-    std::shared_ptr<ResultType> result = std::make_shared<ResultType>();
+    std::shared_ptr<OctopusProducer> producer;
+    std::vector<char>                payload;
+    std::shared_ptr<ResultType>      result = std::make_shared<ResultType>();
+
+    Message(std::shared_ptr<OctopusProducer> p)
+    : producer{std::move(p)} {
+        ++producer->m_pending_messages;
+    }
+
+    ~Message() {
+        --producer->m_pending_messages;
+    }
+
 };
 
 OctopusProducer::OctopusProducer(
@@ -36,12 +47,18 @@ std::shared_ptr<diaspora::TopicHandleInterface> OctopusProducer::topic() const {
 
 diaspora::Future<std::optional<diaspora::Flushed>> OctopusProducer::flush() {
     return {
-        [rk=m_rk](int timeout_ms) -> std::optional<diaspora::Flushed> {
-            rd_kafka_flush(rk.get(), timeout_ms);
-            if(rd_kafka_outq_len(rk.get()) == 0) return diaspora::Flushed{};
+        [producer=shared_from_this()](int timeout_ms) -> std::optional<diaspora::Flushed> {
+            if(producer->m_pending_messages == 0) return diaspora::Flushed{};
+            if(timeout_ms > 0) rd_kafka_flush(producer->m_rk.get(), timeout_ms);
+            else while(producer->m_pending_messages) {
+                rd_kafka_flush(producer->m_rk.get(), 100);
+            }
+            if(producer->m_pending_messages == 0) return diaspora::Flushed{};
             else return std::nullopt;
         },
-        [rk=m_rk]() { return rd_kafka_outq_len(rk.get()) == 0; }
+        [producer=shared_from_this()]() {
+            return producer->m_pending_messages == 0;
+        }
     };
 }
 
@@ -66,7 +83,7 @@ diaspora::Future<std::optional<diaspora::EventID>> OctopusProducer::push(
         diaspora::Metadata metadata,
         diaspora::DataView data,
         std::optional<size_t> partition) {
-    auto msg = new Message{};
+    auto msg = new Message{shared_from_this()};
     auto result_ptr = msg->result;
     m_thread_pool->pushWork(
             [this, topic=m_topic, msg,
