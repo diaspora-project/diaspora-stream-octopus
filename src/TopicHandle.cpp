@@ -23,8 +23,10 @@ OctopusTopicHandle::makeProducer(std::string_view name,
         throw diaspora::Exception{"ThreadPool should be an instance of OctopusThreadPool"};
 
     // Create the configuration for the producer
-    KafkaConf kconf{m_driver->m_options};
-    kconf.add(options);
+    KafkaConf kconf{m_driver->m_options.json()["kafka"]};
+    auto& opt = options.json();
+    if(opt.is_object() && opt.contains("kafka") && opt["kafka"].is_object())
+        kconf.add(opt["kafka"]);
     rd_kafka_conf_set_dr_msg_cb(kconf, OctopusProducer::MessageDeliveryCallback);
     kconf["enable.idempotence"] = "true";
     if(batch_size.value > 0)
@@ -79,8 +81,13 @@ OctopusTopicHandle::makeConsumer(std::string_view name,
     }
 
     // Create the configuration for the producer
-    KafkaConf kconf{m_driver->m_options};
-    kconf.add(options);
+    KafkaConf kconf{m_driver->m_options.json()["kafka"]};
+    kconf["enable.partition.eof"] = "false";
+    kconf["auto.offset.reset"] = "earliest";
+    kconf["topic.metadata.refresh.interval.ms"] = "10000";
+    auto& opt = options.json();
+    if(opt.is_object() && opt.contains("kafka") && opt["kafka"].is_object())
+        kconf.add(opt["kafka"]);
     if(batch_size.value > 0) {
         std::cerr << "[octopus:warning] BatchSize ignored by consumer "
                   << "(use a BatchSize of 0 to remove this message)" << std::endl;
@@ -90,9 +97,6 @@ OctopusTopicHandle::makeConsumer(std::string_view name,
                   << "(use a MaxNumBatches of 0 to remove this message)" << std::endl;
     }
     kconf["group.id"] = name;
-    kconf["enable.partition.eof"] = "false";
-    kconf["auto.offset.reset"] = "earliest";
-    kconf["topic.metadata.refresh.interval.ms"] = "10000";
 
     // Create a producer instance
     char errstr[512];

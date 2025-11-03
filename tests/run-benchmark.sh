@@ -5,7 +5,7 @@ HERE=$(dirname $0)
 $HERE/pre-test.sh
 
 echo "==> Generating configuration for backend"
-echo '{"bootstrap.servers":"localhost:9092"}' > benchmark_config.json
+echo '{"kafka":{"bootstrap.servers":"localhost:9092"}}' > benchmark_config.json
 
 echo "==> Creating topic"
 python $HERE/create-topic-for-benchmark.py

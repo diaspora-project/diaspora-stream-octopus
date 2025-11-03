@@ -1,4 +1,4 @@
-set (OCTOPUS_TEST_BACKEND_ARGS "{\"bootstrap.servers\":\"localhost:9092\"}")
+set (OCTOPUS_TEST_BACKEND_ARGS "{\"kafka\":{\"bootstrap.servers\":\"localhost:9092\"}}")
 set (OCTOPUS_TEST_TOPIC_ARGS "{\"replication_factor\":1}")
 
 add_test (NAME DiasporaTestSuite COMMAND

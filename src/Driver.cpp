@@ -1,6 +1,5 @@
 #include "octopus/Driver.hpp"
 #include "octopus/KafkaConf.hpp"
-//#include <uuid.h>
 #include "KafkaHelper.hpp"
 #include <algorithm>
 #include <string>
@@ -19,7 +18,7 @@ void OctopusDriver::createTopic(std::string_view name,
     if(!options.json().is_object())
         throw diaspora::Exception{"Invalid config passed to OctopusDriver::createTopic: should be an object"};
 
-    KafkaConf kconf{m_options};
+    KafkaConf kconf{m_options.json()["kafka"]};
 
     // Get the options
     size_t num_partitions = 1;
@@ -149,7 +148,7 @@ std::shared_ptr<diaspora::TopicHandleInterface> OctopusDriver::openTopic(
     // Create a consumer for the info topic
     auto info_topic_name = "__info_"s + std::string{name};
     // Get info from topic
-    auto info_vector = readFullTopic(info_topic_name, m_options);
+    auto info_vector = readFullTopic(info_topic_name, m_options.json()["kafka"]);
     if(info_vector.size() < 3)
         throw diaspora::Exception{"Information about topic not complete in " + info_topic_name};
     auto validator = diaspora::Validator::FromMetadata(info_vector[0]);
@@ -158,7 +157,7 @@ std::shared_ptr<diaspora::TopicHandleInterface> OctopusDriver::openTopic(
 
     // Get the number of partitions
     char errstr[512];
-    auto kconf = KafkaConf{m_options};
+    auto kconf = KafkaConf{m_options.json()["kafka"]};
     auto conf = kconf.dup();
     auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
     auto _rk = std::shared_ptr<rd_kafka_s>{rk, rd_kafka_destroy};
@@ -226,7 +225,7 @@ bool OctopusDriver::topicExists(std::string_view name) const {
 
     char errstr[512];
 
-    auto kconf = KafkaConf{m_options}.dup();
+    auto kconf = KafkaConf{m_options.json()["kafka"]}.dup();
 
     auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, kconf, errstr, sizeof(errstr));
     if (!rk) {
@@ -295,15 +294,21 @@ std::shared_ptr<diaspora::ThreadPoolInterface> OctopusDriver::makeThreadPool(dia
 std::shared_ptr<diaspora::DriverInterface> OctopusDriver::create(const diaspora::Metadata& options) {
     auto& config = options.json();
     if(!config.is_object())
-        throw diaspora::Exception{"OctopusDriver configuration file doesn't have a correct format"};
-    if(!config.contains("bootstrap.servers"))
+        throw diaspora::Exception{
+            "OctopusDriver configuration file doesn't have a correct format"};
+    if(!config.contains("kafka") || !config["kafka"].is_object())
+        throw diaspora::Exception{
+            "OctopusDriver configuration file doesn't have a correct format"
+            " (expected a \"kafka\" object field)"};
+    auto& kafka_options = config["kafka"];
+    if(!kafka_options.contains("bootstrap.servers"))
         throw diaspora::Exception{
             "\"bootstrap.servers\" not found or not a string in OctopusDriver configuration"};
-    if(!config["bootstrap.servers"].is_string()) {
-        if(!config["bootstrap.servers"].is_array())
+    if(!kafka_options["bootstrap.servers"].is_string()) {
+        if(!kafka_options["bootstrap.servers"].is_array())
             throw diaspora::Exception{"\"bootstrap.servers\" should be a string or an array of strings"};
-        bool all_strings = std::accumulate(config["bootstrap.servers"].begin(),
-                                           config["bootstrap.servers"].end(),
+        bool all_strings = std::accumulate(kafka_options["bootstrap.servers"].begin(),
+                                           kafka_options["bootstrap.servers"].end(),
                                            true,
                                            [](bool acc, auto& e) { return acc && e.is_string(); });
         if(!all_strings)

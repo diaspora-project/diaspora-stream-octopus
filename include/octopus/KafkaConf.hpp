@@ -81,10 +81,10 @@ class KafkaConf {
         return m_config.get();
     }
 
-    void add(const diaspora::Metadata& conf) {
-        if(!conf.json().is_object())
+    void add(const nlohmann::json& conf) {
+        if(!conf.is_object())
             throw diaspora::Exception{"Metadata passed to KafkaConf should be an object"};
-        for(auto& p : conf.json().items()) {
+        for(auto& p : conf.items()) {
             if(p.value().is_string()) {
                 (*this)[p.key()] = p.value().get_ref<const std::string&>();
             } else if(p.value().is_array()) {
@@ -101,11 +101,19 @@ class KafkaConf {
         }
     }
 
+    void add(const diaspora::Metadata& conf) {
+        add(conf.json());
+    };
+
     inline KafkaConf(const diaspora::Metadata& conf)
     : KafkaConf() {
         add(conf);
     }
 
+    inline KafkaConf(const nlohmann::json& conf)
+    : KafkaConf() {
+        add(conf);
+    }
 };
 
 }
