@@ -1,7 +1,7 @@
 spack:
   specs:
   - cmake
-  - diaspora-stream-api
+  - diaspora-stream-api+tests+python+benchmarks
   - pkg-config
   - librdkafka
   - uuid
