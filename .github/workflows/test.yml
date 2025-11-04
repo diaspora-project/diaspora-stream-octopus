@@ -1,0 +1,51 @@
+name: Unit tests
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+    - main
+  pull_request:
+    branches:
+    - main
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup spack
+      uses: spack/setup-spack@v2.1.1
+      with:
+        ref: develop
+
+    - name: Set install root for Spack
+      run: |
+        spack -e tests config add config:install_tree:root:/opt/spack
+        spack -e tests config add view:/opt/view
+
+    - name: Add mdiaspora-spack-packages
+      run: |
+        git clone https://github.com/diaspora-project/diaspora-spack-packages
+        spack -e tests repo add diaspora-spack-packages/spack_repos/diaspora
+
+    - name: Install spack environment
+      run: |
+        spack -e tests install
+
+    - name: Show spack-installed packages for debugging
+      run: |
+        spack -e tests find -dclv
+
+    - name: Build code and run unit tests
+      run: |
+        eval `spack env activate --sh tests`
+        mkdir build
+        cd build
+        cmake .. -DENABLE_TESTS=ON \
+                 -DENABLE_MSK=ON \
+                 -DCMAKE_BUILD_TYPE=RelWithDebInfo
+        make
+        ctest -VV --output-on-failure

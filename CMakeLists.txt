@@ -18,6 +18,7 @@ add_library (warnings_config INTERFACE)
 
 option (ENABLE_TESTS     "Build tests" OFF)
 option (ENABLE_COVERAGE  "Build with coverage" OFF)
+option (ENABLE_MSK       "Build with AWS support" OFF)
 
 # add our cmake module directory to the path
 set (CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
@@ -60,6 +61,13 @@ find_package (diaspora-stream-api REQUIRED)
 find_package (PkgConfig REQUIRED)
 pkg_check_modules (RDKAFKA REQUIRED IMPORTED_TARGET rdkafka++ rdkafka)
 pkg_check_modules (UUID REQUIRED IMPORTED_TARGET uuid)
+
+if (ENABLE_MSK)
+    find_package (AWSSDK REQUIRED COMPONENTS core)
+    find_package (OpenSSL REQUIRED)
+    set (OPTIONAL_LIBRARIES aws-cpp-sdk-core OpenSSL::SSL OpenSSL::Crypto)
+    add_definitions (-DOCTOPUS_HAS_AWS)
+endif ()
 
 add_subdirectory (src)
 

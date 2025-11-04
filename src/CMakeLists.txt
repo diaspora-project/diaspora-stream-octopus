@@ -1,5 +1,14 @@
 # set source files
-file (GLOB src-files "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
+file (GLOB src-files
+      "${CMAKE_CURRENT_SOURCE_DIR}/Driver.cpp"
+      "${CMAKE_CURRENT_SOURCE_DIR}/Consumer.cpp"
+      "${CMAKE_CURRENT_SOURCE_DIR}/Producer.cpp"
+      "${CMAKE_CURRENT_SOURCE_DIR}/TopicHandle.cpp"
+)
+
+if (ENABLE_MSK)
+    list (APPEND src-files AwsMskIamSigner.cpp)
+endif ()
 
 # load package helper for generating cmake CONFIG packages
 include (CMakePackageConfigHelpers)
@@ -14,7 +23,7 @@ set (octopus-vers "${octopus_VERSION_MAJOR}.${octopus_VERSION_MINOR}")
 add_library (octopus ${src-files})
 target_link_libraries (octopus
     PUBLIC diaspora-stream-api PkgConfig::RDKAFKA
-    PRIVATE coverage_config warnings_config PkgConfig::UUID)
+    PRIVATE coverage_config warnings_config PkgConfig::UUID ${OPTIONAL_LIBRARIES})
 target_include_directories (octopus PUBLIC $<INSTALL_INTERFACE:include>)
 target_include_directories (octopus BEFORE PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)

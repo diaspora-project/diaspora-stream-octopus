@@ -42,6 +42,7 @@ void OctopusDriver::createTopic(std::string_view name,
     // Create a producer instance
     char errstr[512];
     auto conf = kconf.dup(); // rd_kafka_new will take ownership if successful
+    applyAwsAuthIfConfigured(conf, m_options.json()["kafka"]);
     auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
     if (!rk) {
         rd_kafka_conf_destroy(conf);
@@ -159,6 +160,7 @@ std::shared_ptr<diaspora::TopicHandleInterface> OctopusDriver::openTopic(
     char errstr[512];
     auto kconf = KafkaConf{m_options.json()["kafka"]};
     auto conf = kconf.dup();
+    applyAwsAuthIfConfigured(conf, m_options.json()["kafka"]);
     auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
     auto _rk = std::shared_ptr<rd_kafka_s>{rk, rd_kafka_destroy};
     if (!rk) {
@@ -226,6 +228,7 @@ bool OctopusDriver::topicExists(std::string_view name) const {
     char errstr[512];
 
     auto kconf = KafkaConf{m_options.json()["kafka"]}.dup();
+    applyAwsAuthIfConfigured(kconf, m_options.json()["kafka"]);
 
     auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, kconf, errstr, sizeof(errstr));
     if (!rk) {

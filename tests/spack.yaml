@@ -5,6 +5,8 @@ spack:
   - pkg-config
   - librdkafka
   - uuid
+  - aws-sdk-cpp
+  - openssl
   concretizer:
     unify: true
     reuse: true
