@@ -36,7 +36,7 @@ The configuration should be a JSON object with at minimum the following informat
 ```json
 {
     "kafka": {
-        "bootstrap.servers": [ "host1:port1", "host2:port2, ...],
+        "bootstrap.servers": [ "host1:port1", "host2:port2", ...],
         ...
     },
     ...
