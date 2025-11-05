@@ -7,7 +7,7 @@ spack:
   - uuid
   - aws-sdk-cpp
   - openssl
-  - kafka@2.13-4.1.0:
+  - kafka
   concretizer:
     unify: true
     reuse: true
@@ -15,3 +15,6 @@ spack:
     prefix_inspections:
       lib: [LD_LIBRARY_PATH]
       lib64: [LD_LIBRARY_PATH]
+  packages:
+    kafka:
+      require: [ "@2.13-4.1.0:" ]
