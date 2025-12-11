@@ -26,11 +26,6 @@ jobs:
         spack -e tests config add config:install_tree:root:/opt/spack
         spack -e tests config add view:/opt/view
 
-    - name: Add mdiaspora-spack-packages
-      run: |
-        git clone https://github.com/diaspora-project/diaspora-spack-packages
-        spack -e tests repo add diaspora-spack-packages/spack_repo/diaspora
-
     - name: Install spack environment
       run: |
         spack -e tests install

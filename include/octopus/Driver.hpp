@@ -33,6 +33,8 @@ class OctopusDriver : public diaspora::DriverInterface,
 
     bool topicExists(std::string_view name) const override;
 
+    std::unordered_map<std::string, diaspora::Metadata> listTopics() const override;
+
     std::shared_ptr<diaspora::ThreadPoolInterface> defaultThreadPool() const override;
 
     std::shared_ptr<diaspora::ThreadPoolInterface> makeThreadPool(diaspora::ThreadCount count) const override;

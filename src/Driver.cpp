@@ -286,6 +286,74 @@ bool OctopusDriver::topicExists(std::string_view name) const {
     return true;
 }
 
+std::unordered_map<std::string, diaspora::Metadata> OctopusDriver::listTopics() const {
+    char errstr[512];
+
+    auto kconf = KafkaConf{m_options.json()["kafka"]};
+    auto conf = kconf.dup();
+    applyAwsAuthIfConfigured(conf, m_options.json()["kafka"]);
+    auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
+    if (!rk) {
+        rd_kafka_conf_destroy(conf);
+        throw diaspora::Exception{
+            std::string{"Failed to create Kafka handle: "} + errstr};
+    }
+    auto _rk = std::shared_ptr<rd_kafka_t>{rk, rd_kafka_destroy};
+
+    // Fetch metadata for all topics
+    const rd_kafka_metadata_t *metadata;
+    rd_kafka_resp_err_t err = rd_kafka_metadata(
+        rk,          // Kafka handle
+        1,           // all_topics=1 means all topics
+        nullptr,     // no specific topic
+        &metadata,   // output pointer
+        5000         // timeout in ms
+    );
+
+    if (err != RD_KAFKA_RESP_ERR_NO_ERROR)
+        throw diaspora::Exception{
+            std::string{"Failed to get metadata: "} + rd_kafka_err2str(err)};
+
+    auto _metadata = std::shared_ptr<const rd_kafka_metadata_t>{
+        metadata, rd_kafka_metadata_destroy};
+
+    std::unordered_map<std::string, diaspora::Metadata> result;
+
+    // Iterate through all topics
+    for (int i = 0; i < metadata->topic_cnt; i++) {
+        const rd_kafka_metadata_topic_t &topic = metadata->topics[i];
+        std::string topic_name = topic.topic;
+
+        // Skip __info_ topics (these are internal metadata topics)
+        if (topic_name.rfind("__info_", 0) == 0) {
+            continue;
+        }
+
+        // Try to read the info topic for this topic
+        auto info_topic_name = "__info_"s + topic_name;
+
+        try {
+            auto info_vector = readFullTopic(info_topic_name, m_options.json()["kafka"]);
+            if (info_vector.size() >= 3) {
+                // We have valid metadata - construct the metadata JSON
+                nlohmann::json metadata_json;
+                metadata_json["validator"] = nlohmann::json::parse(info_vector[0]);
+                metadata_json["selector"] = nlohmann::json::parse(info_vector[1]);
+                metadata_json["serializer"] = nlohmann::json::parse(info_vector[2]);
+                metadata_json["num_partitions"] = topic.partition_cnt;
+
+                result[topic_name] = diaspora::Metadata{metadata_json};
+            }
+        } catch (...) {
+            // If we can't read the info topic, skip this topic
+            // (it might not be a Diaspora topic or the info topic doesn't exist)
+            continue;
+        }
+    }
+
+    return result;
+}
+
 std::shared_ptr<diaspora::ThreadPoolInterface> OctopusDriver::defaultThreadPool() const {
     return m_default_thread_pool;
 }
