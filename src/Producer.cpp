@@ -30,7 +30,7 @@ OctopusProducer::OctopusProducer(
     diaspora::BatchSize batch_size,
     diaspora::MaxNumBatches max_num_batches,
     diaspora::Ordering ordering,
-    std::shared_ptr<OctopusThreadPool> thread_pool,
+    std::shared_ptr<diaspora::ThreadPoolInterface> thread_pool,
     std::shared_ptr<OctopusTopicHandle> topic,
     std::shared_ptr<rd_kafka_t> rk)
     : m_name{std::move(name)}

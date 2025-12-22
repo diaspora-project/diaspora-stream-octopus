@@ -19,9 +19,6 @@ OctopusTopicHandle::makeProducer(std::string_view name,
         std::shared_ptr<diaspora::ThreadPoolInterface> thread_pool,
         diaspora::Metadata options) {
     if(!thread_pool) thread_pool = m_driver->makeThreadPool(diaspora::ThreadCount{0});
-    auto pool = std::dynamic_pointer_cast<OctopusThreadPool>(thread_pool);
-    if(!pool)
-        throw diaspora::Exception{"ThreadPool should be an instance of OctopusThreadPool"};
 
     // Create the configuration for the producer
     KafkaConf kconf{m_driver->m_options.json()["kafka"]};
@@ -45,7 +42,7 @@ OctopusTopicHandle::makeProducer(std::string_view name,
     auto _rk = std::shared_ptr<rd_kafka_t>{rk, rd_kafka_destroy};
 
     return std::make_shared<OctopusProducer>(
-            std::string{name}, batch_size, max_batch, ordering, pool,
+            std::string{name}, batch_size, max_batch, ordering, thread_pool,
             shared_from_this(), std::move(_rk));
 }
 
@@ -59,9 +56,6 @@ OctopusTopicHandle::makeConsumer(std::string_view name,
         const std::vector<size_t>& targets,
         diaspora::Metadata options) {
     if(!thread_pool) thread_pool = m_driver->makeThreadPool(diaspora::ThreadCount{0});
-    auto pool = std::dynamic_pointer_cast<OctopusThreadPool>(thread_pool);
-    if(!pool)
-        throw diaspora::Exception{"ThreadPool should be an instance of OctopusThreadPool"};
 
     // Create list of partitions
     std::shared_ptr<rd_kafka_topic_partition_list_s> topic_list;
@@ -120,7 +114,7 @@ OctopusTopicHandle::makeConsumer(std::string_view name,
     }
 
     return std::make_shared<OctopusConsumer>(
-            std::string{name}, batch_size, max_batch, pool,
+            std::string{name}, batch_size, max_batch, thread_pool,
             shared_from_this(), std::move(data_allocator),
             std::move(data_selector), targets, _rk);
 }

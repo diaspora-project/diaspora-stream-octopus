@@ -1,7 +1,6 @@
 #include "octopus/Consumer.hpp"
 #include "octopus/Driver.hpp"
 #include "octopus/TopicHandle.hpp"
-#include "octopus/ThreadPool.hpp"
 #include "octopus/KafkaConf.hpp"
 #include "octopus/Event.hpp"
 
@@ -122,7 +121,7 @@ OctopusConsumer::OctopusConsumer(
         std::string name,
         diaspora::BatchSize batch_size,
         diaspora::MaxNumBatches max_num_batches,
-        std::shared_ptr<OctopusThreadPool> thread_pool,
+        std::shared_ptr<diaspora::ThreadPoolInterface> thread_pool,
         std::shared_ptr<OctopusTopicHandle> topic,
         diaspora::DataAllocator data_allocator,
         diaspora::DataSelector data_selector,

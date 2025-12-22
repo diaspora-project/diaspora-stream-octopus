@@ -359,7 +359,7 @@ std::shared_ptr<diaspora::ThreadPoolInterface> OctopusDriver::defaultThreadPool(
 }
 
 std::shared_ptr<diaspora::ThreadPoolInterface> OctopusDriver::makeThreadPool(diaspora::ThreadCount count) const {
-    return std::make_shared<OctopusThreadPool>(count);
+    return std::make_shared<diaspora::PosixThreadPool>(count);
 }
 
 std::shared_ptr<diaspora::DriverInterface> OctopusDriver::create(const diaspora::Metadata& options) {

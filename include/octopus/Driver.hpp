@@ -2,7 +2,7 @@
 #define OCTOPUS_DRIVER_HPP
 
 #include <diaspora/Driver.hpp>
-#include <octopus/ThreadPool.hpp>
+#include <diaspora/PosixThreadPool.hpp>
 #include <octopus/TopicHandle.hpp>
 
 namespace octopus {
@@ -15,7 +15,7 @@ class OctopusDriver : public diaspora::DriverInterface,
     friend class OctopusTopicHandle;
 
     std::shared_ptr<diaspora::ThreadPoolInterface> m_default_thread_pool =
-        std::make_shared<OctopusThreadPool>(diaspora::ThreadCount{0});
+        std::make_shared<diaspora::PosixThreadPool>(diaspora::ThreadCount{0});
     const diaspora::Metadata m_options;
 
     public:

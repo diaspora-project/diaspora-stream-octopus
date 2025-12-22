@@ -27,4 +27,4 @@ spack:
       - "@2.13-4.1.0:"
     diaspora-stream-api:
       require:
-      - "@0.5.0:"
+      - "@0.5.1:"

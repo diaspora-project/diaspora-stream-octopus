@@ -1,7 +1,6 @@
 #ifndef OCTOPUS_PRODUCER_HPP
 #define OCTOPUS_PRODUCER_HPP
 
-#include <octopus/ThreadPool.hpp>
 #include <octopus/TopicHandle.hpp>
 #include <diaspora/Producer.hpp>
 #include <librdkafka/rdkafka.h>
@@ -18,13 +17,13 @@ class OctopusProducer final : public diaspora::ProducerInterface,
     friend class OctopusTopicHandle;
     friend struct Message;
 
-    const std::string                         m_name;
-    const diaspora::BatchSize                 m_batch_size;
-    const diaspora::MaxNumBatches             m_max_num_batches;
-    const diaspora::Ordering                  m_ordering;
-    const std::shared_ptr<OctopusThreadPool>  m_thread_pool;
-    const std::shared_ptr<OctopusTopicHandle> m_topic;
-    const std::shared_ptr<rd_kafka_t>         m_rk;
+    const std::string                                    m_name;
+    const diaspora::BatchSize                            m_batch_size;
+    const diaspora::MaxNumBatches                        m_max_num_batches;
+    const diaspora::Ordering                             m_ordering;
+    const std::shared_ptr<diaspora::ThreadPoolInterface> m_thread_pool;
+    const std::shared_ptr<OctopusTopicHandle>            m_topic;
+    const std::shared_ptr<rd_kafka_t>                    m_rk;
 
     static void MessageDeliveryCallback(
         rd_kafka_t *rk,
@@ -40,7 +39,7 @@ class OctopusProducer final : public diaspora::ProducerInterface,
         diaspora::BatchSize batch_size,
         diaspora::MaxNumBatches max_num_batches,
         diaspora::Ordering ordering,
-        std::shared_ptr<OctopusThreadPool> thread_pool,
+        std::shared_ptr<diaspora::ThreadPoolInterface> thread_pool,
         std::shared_ptr<OctopusTopicHandle> topic,
         std::shared_ptr<rd_kafka_t> rk);
 
