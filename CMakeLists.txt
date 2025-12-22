@@ -9,7 +9,7 @@ enable_testing ()
 # library version set here (e.g. for shared libs).
 set (OCTOPUS_VERSION_MAJOR 0)
 set (OCTOPUS_VERSION_MINOR 1)
-set (OCTOPUS_VERSION_PATCH 0)
+set (OCTOPUS_VERSION_PATCH 1)
 set (OCTOPUS_VERSION
     "${OCTOPUS_VERSION_MAJOR}.${OCTOPUS_VERSION_MINOR}.${OCTOPUS_VERSION_PATCH}")
 
