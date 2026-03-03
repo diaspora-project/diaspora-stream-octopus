@@ -2,6 +2,7 @@
 #include "octopus/KafkaConf.hpp"
 #include "KafkaHelper.hpp"
 #include <algorithm>
+#include <chrono>
 #include <iostream>
 #include <string>
 
@@ -87,6 +88,7 @@ void OctopusDriver::createTopic(std::string_view name,
     // Create a queue for the result of the operation
     auto queue = std::shared_ptr<rd_kafka_queue_t>{rd_kafka_queue_new(rk), rd_kafka_queue_destroy};
 
+    std::shared_ptr<rd_kafka_NewTopic_s> _new_info_topic;
     if(disable_info_topic) {
         // Only create the main topic
         rd_kafka_NewTopic_t *new_topics[] = {new_topic};
@@ -96,15 +98,22 @@ void OctopusDriver::createTopic(std::string_view name,
         auto info_topic_name = kafkaTopicName("__info_"s + std::string{name});
         auto new_info_topic =
             rd_kafka_NewTopic_new(info_topic_name.data(), 1, replication_factor, errstr, sizeof(errstr));
-        if (!new_info_topic) throw diaspora::Exception{"Failed to create NewTopic object: " + std::string{errstr}};
-        auto _new_info_topic = std::shared_ptr<rd_kafka_NewTopic_s>{new_info_topic, rd_kafka_NewTopic_destroy};
+        if (!new_info_topic)
+            throw diaspora::Exception{"Failed to create NewTopic object: " + std::string{errstr}};
+        _new_info_topic = std::shared_ptr<rd_kafka_NewTopic_s>{new_info_topic, rd_kafka_NewTopic_destroy};
 
         rd_kafka_NewTopic_t *new_topics[] = {new_topic, new_info_topic};
         rd_kafka_CreateTopics(rk, new_topics, 2, admin_options, queue.get());
     }
 
-    // Wait for the result for up to 10 seconds
-    auto event = rd_kafka_queue_poll(queue.get(), 10000);
+    // Poll for the result, driving the event loop in 100ms increments
+    rd_kafka_event_t* event = nullptr;
+    {
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+        while(!event && std::chrono::steady_clock::now() < deadline) {
+            event = rd_kafka_queue_poll(queue.get(), 100);
+        }
+    }
     if (!event) throw diaspora::Exception{"Timed out waiting for CreateTopics result"};
     auto _event = std::shared_ptr<rd_kafka_event_t>{event, rd_kafka_event_destroy};
 
@@ -221,7 +230,7 @@ std::shared_ptr<diaspora::TopicHandleInterface> OctopusDriver::openTopic(
         0,                       // all_topics=0 means only this topic
         rd_kafka_topic_new(rk, kafka_name.c_str(), nullptr), // topic handle
         &metadata,               // output pointer
-        5000                     // timeout in ms
+        60000                     // timeout in ms
     );
 
     if (err != RD_KAFKA_RESP_ERR_NO_ERROR)
@@ -303,8 +312,14 @@ bool OctopusDriver::topicExists(std::string_view name) const {
     // Initiate the topic description
     rd_kafka_DescribeTopics(rk, topic_collection, admin_options, queue.get());
 
-    // Wait for the result for up to 10 seconds
-    auto event = rd_kafka_queue_poll(queue.get(), 10000);
+    // Poll for the result, driving the event loop in 100ms increments
+    rd_kafka_event_t* event = nullptr;
+    {
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+        while(!event && std::chrono::steady_clock::now() < deadline) {
+            event = rd_kafka_queue_poll(queue.get(), 100);
+        }
+    }
     if (!event) throw diaspora::Exception{"Timed out waiting for DescribeTopics result"};
     auto _event = std::shared_ptr<rd_kafka_event_t>{event, rd_kafka_event_destroy};
 
