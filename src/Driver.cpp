@@ -2,6 +2,7 @@
 #include "octopus/KafkaConf.hpp"
 #include "KafkaHelper.hpp"
 #include <algorithm>
+#include <iostream>
 #include <string>
 
 namespace octopus {
@@ -39,6 +40,27 @@ void OctopusDriver::createTopic(std::string_view name,
         replication_factor = options.json()["replication_factor"].get<size_t>();
     }
 
+    // Check if info topic creation should be disabled
+    bool disable_info_topic = false;
+    if(options.json().contains("disable_info_topic")
+    && options.json()["disable_info_topic"].is_boolean()
+    && options.json()["disable_info_topic"].get<bool>()) {
+        auto is_default = [](const auto& component) {
+            const auto& j = component->metadata().json();
+            return !j.is_object() || !j.contains("type") || j["type"] == "default";
+        };
+        if(!is_default(validator))
+            throw diaspora::Exception{
+                "Cannot disable info topic: validator type is not \"default\""};
+        if(!is_default(selector))
+            throw diaspora::Exception{
+                "Cannot disable info topic: partition selector type is not \"default\""};
+        if(!is_default(serializer))
+            throw diaspora::Exception{
+                "Cannot disable info topic: serializer type is not \"default\""};
+        disable_info_topic = true;
+    }
+
     // Create a producer instance
     char errstr[512];
     auto conf = kconf.dup(); // rd_kafka_new will take ownership if successful
@@ -57,13 +79,6 @@ void OctopusDriver::createTopic(std::string_view name,
     if (!new_topic) throw diaspora::Exception{"Failed to create NewTopic object: " + std::string{errstr}};
     auto _new_topic = std::shared_ptr<rd_kafka_NewTopic_s>{new_topic, rd_kafka_NewTopic_destroy};
 
-    // Create the NewTopic object for __info_<name> topic
-    auto info_topic_name = kafkaTopicName("__info_"s + std::string{name});
-    auto new_info_topic =
-        rd_kafka_NewTopic_new(info_topic_name.data(), 1, replication_factor, errstr, sizeof(errstr));
-    if (!new_info_topic) throw diaspora::Exception{"Failed to create NewTopic object: " + std::string{errstr}};
-    auto _new_info_topic = std::shared_ptr<rd_kafka_NewTopic_s>{new_info_topic, rd_kafka_NewTopic_destroy};
-
     // Create an admin options object
     auto admin_options = rd_kafka_AdminOptions_new(rk, RD_KAFKA_ADMIN_OP_CREATETOPICS);
     if (!admin_options) throw diaspora::Exception{"Failed to create rd_kafka_AdminOptions_t"};
@@ -72,9 +87,21 @@ void OctopusDriver::createTopic(std::string_view name,
     // Create a queue for the result of the operation
     auto queue = std::shared_ptr<rd_kafka_queue_t>{rd_kafka_queue_new(rk), rd_kafka_queue_destroy};
 
-    // Initiate the topic creation
-    rd_kafka_NewTopic_t *new_topics[] = {new_topic, new_info_topic};
-    rd_kafka_CreateTopics(rk, new_topics, 2, admin_options, queue.get());
+    if(disable_info_topic) {
+        // Only create the main topic
+        rd_kafka_NewTopic_t *new_topics[] = {new_topic};
+        rd_kafka_CreateTopics(rk, new_topics, 1, admin_options, queue.get());
+    } else {
+        // Create both the main topic and the info topic
+        auto info_topic_name = kafkaTopicName("__info_"s + std::string{name});
+        auto new_info_topic =
+            rd_kafka_NewTopic_new(info_topic_name.data(), 1, replication_factor, errstr, sizeof(errstr));
+        if (!new_info_topic) throw diaspora::Exception{"Failed to create NewTopic object: " + std::string{errstr}};
+        auto _new_info_topic = std::shared_ptr<rd_kafka_NewTopic_s>{new_info_topic, rd_kafka_NewTopic_destroy};
+
+        rd_kafka_NewTopic_t *new_topics[] = {new_topic, new_info_topic};
+        rd_kafka_CreateTopics(rk, new_topics, 2, admin_options, queue.get());
+    }
 
     // Wait for the result for up to 10 seconds
     auto event = rd_kafka_queue_poll(queue.get(), 10000);
@@ -89,7 +116,8 @@ void OctopusDriver::createTopic(std::string_view name,
     auto result = rd_kafka_event_CreateTopics_result(event);
     size_t topic_count;
     auto topics_result = rd_kafka_CreateTopics_result_topics(result, &topic_count);
-    if (topic_count != 2)
+    size_t expected_topic_count = disable_info_topic ? 1 : 2;
+    if (topic_count != expected_topic_count)
         throw diaspora::Exception{
             "Invalid number of topic results returned by rd_kafka_CreateTopics_result_topics"};
 
@@ -102,61 +130,76 @@ void OctopusDriver::createTopic(std::string_view name,
         }
     }
 
-    // Produce the metadata to the info topic
-    auto validator_metadata = validator->metadata().json().dump();
-    rd_kafka_resp_err_t err = rd_kafka_producev(
-        rk,
-        RD_KAFKA_V_TOPIC(info_topic_name.c_str()),
-        RD_KAFKA_V_MSGFLAGS(RD_KAFKA_MSG_F_COPY),
-        RD_KAFKA_V_VALUE(validator_metadata.data(), validator_metadata.size()),
-        RD_KAFKA_V_END);
-    if (err)
-        throw diaspora::Exception{
-            "Failed to produce validator metadata: " + std::string{rd_kafka_err2str(err)}};
+    if(!disable_info_topic) {
+        auto info_topic_name = kafkaTopicName("__info_"s + std::string{name});
 
-    // Produce the selector metadata
-    auto selector_metadata = selector->metadata().json().dump();
-    err = rd_kafka_producev(
-        rk,
-        RD_KAFKA_V_TOPIC(info_topic_name.c_str()),
-        RD_KAFKA_V_MSGFLAGS(RD_KAFKA_MSG_F_COPY),
-        RD_KAFKA_V_VALUE(selector_metadata.data(), selector_metadata.size()),
-        RD_KAFKA_V_END);
-    if (err)
-        throw diaspora::Exception{
-            "Failed to produce selector metadata: " + std::string{rd_kafka_err2str(err)}};
+        // Produce the metadata to the info topic
+        auto validator_metadata = validator->metadata().json().dump();
+        rd_kafka_resp_err_t err = rd_kafka_producev(
+            rk,
+            RD_KAFKA_V_TOPIC(info_topic_name.c_str()),
+            RD_KAFKA_V_MSGFLAGS(RD_KAFKA_MSG_F_COPY),
+            RD_KAFKA_V_VALUE(validator_metadata.data(), validator_metadata.size()),
+            RD_KAFKA_V_END);
+        if (err)
+            throw diaspora::Exception{
+                "Failed to produce validator metadata: " + std::string{rd_kafka_err2str(err)}};
 
-    // Produce the serializer metadata
-    auto serializer_metadata = serializer->metadata().json().dump();
-    err = rd_kafka_producev(
-        rk,
-        RD_KAFKA_V_TOPIC(info_topic_name.c_str()),
-        RD_KAFKA_V_MSGFLAGS(RD_KAFKA_MSG_F_COPY),
-        RD_KAFKA_V_VALUE(serializer_metadata.data(), serializer_metadata.size()),
-        RD_KAFKA_V_END);
-    if (err)
-        throw diaspora::Exception{
-            "Failed to produce serializer metadata: " + std::string{rd_kafka_err2str(err)}};
+        // Produce the selector metadata
+        auto selector_metadata = selector->metadata().json().dump();
+        err = rd_kafka_producev(
+            rk,
+            RD_KAFKA_V_TOPIC(info_topic_name.c_str()),
+            RD_KAFKA_V_MSGFLAGS(RD_KAFKA_MSG_F_COPY),
+            RD_KAFKA_V_VALUE(selector_metadata.data(), selector_metadata.size()),
+            RD_KAFKA_V_END);
+        if (err)
+            throw diaspora::Exception{
+                "Failed to produce selector metadata: " + std::string{rd_kafka_err2str(err)}};
 
-    // Flush the producer to ensure the messages are sent
-    err = rd_kafka_flush(rk, 10000);
-    if (err)
-        throw diaspora::Exception{
-            "Failed to flush producer: " + std::string{rd_kafka_err2str(err)}};
+        // Produce the serializer metadata
+        auto serializer_metadata = serializer->metadata().json().dump();
+        err = rd_kafka_producev(
+            rk,
+            RD_KAFKA_V_TOPIC(info_topic_name.c_str()),
+            RD_KAFKA_V_MSGFLAGS(RD_KAFKA_MSG_F_COPY),
+            RD_KAFKA_V_VALUE(serializer_metadata.data(), serializer_metadata.size()),
+            RD_KAFKA_V_END);
+        if (err)
+            throw diaspora::Exception{
+                "Failed to produce serializer metadata: " + std::string{rd_kafka_err2str(err)}};
+
+        // Flush the producer to ensure the messages are sent
+        err = rd_kafka_flush(rk, 10000);
+        if (err)
+            throw diaspora::Exception{
+                "Failed to flush producer: " + std::string{rd_kafka_err2str(err)}};
+    }
 }
 
 std::shared_ptr<diaspora::TopicHandleInterface> OctopusDriver::openTopic(
         std::string_view name) const {
-    // Create a consumer for the info topic
+    // Check if the topic exists
+    if(!topicExists(name))
+        throw diaspora::Exception{std::string{"Topic \""} + std::string{name} + "\" not found"};
+
     auto kafka_name = kafkaTopicName(name);
     auto info_topic_name = kafkaTopicName("__info_"s + std::string{name});
     // Get info from topic
-    auto info_vector = readFullTopic(info_topic_name, m_options.json());
-    if(info_vector.size() < 3)
-        throw diaspora::Exception{"Information about topic not complete in " + info_topic_name};
-    auto validator = diaspora::Validator::FromMetadata(info_vector[0]);
-    auto selector = diaspora::PartitionSelector::FromMetadata(info_vector[1]);
-    auto serializer = diaspora::Serializer::FromMetadata(info_vector[2]);
+    diaspora::Validator validator;
+    diaspora::PartitionSelector selector;
+    diaspora::Serializer serializer;
+    try {
+        auto info_vector = readFullTopic(info_topic_name, m_options.json());
+        if(info_vector.size() < 3)
+            throw diaspora::Exception{"Information about topic not complete in " + info_topic_name};
+        validator = diaspora::Validator::FromMetadata(info_vector[0]);
+        selector = diaspora::PartitionSelector::FromMetadata(info_vector[1]);
+        serializer = diaspora::Serializer::FromMetadata(info_vector[2]);
+    } catch(const diaspora::Exception&) {
+        std::cerr << "[octopus:warning] Could not read info topic " << info_topic_name
+                  << ", using default validator, serializer, and partition selector" << std::endl;
+    }
 
     // Get the number of partitions
     char errstr[512];
@@ -227,7 +270,6 @@ std::shared_ptr<diaspora::TopicHandleInterface> OctopusDriver::openTopic(
 
 bool OctopusDriver::topicExists(std::string_view name) const {
     auto kafka_name = kafkaTopicName(name);
-    auto info_topic_name = kafkaTopicName("__info_"s + std::string{name});
 
     char errstr[512];
 
@@ -252,8 +294,8 @@ bool OctopusDriver::topicExists(std::string_view name) const {
         rd_kafka_queue_destroy};
 
     // Create a topic collection
-    const char* topic_names[] = {kafka_name.c_str(), info_topic_name.c_str()};
-    auto topic_collection = rd_kafka_TopicCollection_of_topic_names(topic_names, 2);
+    const char* topic_names[] = {kafka_name.c_str()};
+    auto topic_collection = rd_kafka_TopicCollection_of_topic_names(topic_names, 1);
     if (!topic_collection) throw diaspora::Exception{"Failed to create rd_kafka_TopicCollection_t"};
     auto _topic_collection = std::shared_ptr<rd_kafka_TopicCollection_t>{
         topic_collection, rd_kafka_TopicCollection_destroy};
@@ -274,20 +316,16 @@ bool OctopusDriver::topicExists(std::string_view name) const {
     auto result = rd_kafka_event_DescribeTopics_result(event);
     size_t topic_count;
     auto topics_result = rd_kafka_DescribeTopics_result_topics(result, &topic_count);
-    if (topic_count != 2)
+    if (topic_count != 1)
         throw diaspora::Exception{
             "Invalid number of topic results returned by rd_kafka_DescribeTopics_result_topics"};
 
-    // Check the results for errors
-    for(size_t i = 0; i < topic_count; ++i) {
-        auto err = rd_kafka_TopicDescription_error(topics_result[i]);
-        if (!err) continue;
-        if (rd_kafka_error_code(err) == RD_KAFKA_RESP_ERR_UNKNOWN_TOPIC_OR_PART)
-            return false;
-        throw diaspora::Exception{"Failed to describe topic: "
-            + std::string{rd_kafka_error_string(err)}};
-    }
-    return true;
+    auto err = rd_kafka_TopicDescription_error(topics_result[0]);
+    if (!err) return true;
+    if (rd_kafka_error_code(err) == RD_KAFKA_RESP_ERR_UNKNOWN_TOPIC_OR_PART)
+        return false;
+    throw diaspora::Exception{"Failed to describe topic: "
+        + std::string{rd_kafka_error_string(err)}};
 }
 
 std::unordered_map<std::string, diaspora::Metadata> OctopusDriver::listTopics() const {
