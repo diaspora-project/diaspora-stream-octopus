@@ -18,12 +18,21 @@ class OctopusDriver : public diaspora::DriverInterface,
         std::make_shared<diaspora::PosixThreadPool>(diaspora::ThreadCount{0});
     const diaspora::Metadata m_options;
     const std::string m_namespace;
+    const bool m_disable_info_topic;
 
     static std::string extractNamespace(const diaspora::Metadata& options) {
         auto& config = options.json();
         if(config.is_object() && config.contains("namespace") && config["namespace"].is_string())
             return config["namespace"].get<std::string>();
         return {};
+    }
+
+    static bool extractDisableInfoTopic(const diaspora::Metadata& options) {
+        auto& config = options.json();
+        if(config.is_object() && config.contains("disable_info_topic")
+        && config["disable_info_topic"].is_boolean())
+            return config["disable_info_topic"].get<bool>();
+        return false;
     }
 
     std::string kafkaTopicName(std::string_view name) const {
@@ -35,7 +44,8 @@ class OctopusDriver : public diaspora::DriverInterface,
 
     OctopusDriver(const diaspora::Metadata& options)
     : m_options(options)
-    , m_namespace(extractNamespace(options)) {}
+    , m_namespace(extractNamespace(options))
+    , m_disable_info_topic(extractDisableInfoTopic(options)) {}
 
     void createTopic(std::string_view name,
                      const diaspora::Metadata& options,

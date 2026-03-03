@@ -41,10 +41,11 @@ void OctopusDriver::createTopic(std::string_view name,
     }
 
     // Check if info topic creation should be disabled
-    bool disable_info_topic = false;
+    bool disable_info_topic = m_disable_info_topic;
     if(options.json().contains("disable_info_topic")
-    && options.json()["disable_info_topic"].is_boolean()
-    && options.json()["disable_info_topic"].get<bool>()) {
+    && options.json()["disable_info_topic"].is_boolean())
+        disable_info_topic = options.json()["disable_info_topic"].get<bool>();
+    if(disable_info_topic) {
         auto is_default = [](const auto& component) {
             const auto& j = component->metadata().json();
             return !j.is_object() || !j.contains("type") || j["type"] == "default";
@@ -58,7 +59,6 @@ void OctopusDriver::createTopic(std::string_view name,
         if(!is_default(serializer))
             throw diaspora::Exception{
                 "Cannot disable info topic: serializer type is not \"default\""};
-        disable_info_topic = true;
     }
 
     // Create a producer instance
@@ -431,6 +431,9 @@ std::shared_ptr<diaspora::DriverInterface> OctopusDriver::create(const diaspora:
     if(config.contains("namespace") && !config["namespace"].is_string())
         throw diaspora::Exception{
             "\"namespace\" option should be a string"};
+    if(config.contains("disable_info_topic") && !config["disable_info_topic"].is_boolean())
+        throw diaspora::Exception{
+            "\"disable_info_topic\" option should be a boolean"};
     if(!kafka_options.contains("bootstrap.servers"))
         throw diaspora::Exception{
             "\"bootstrap.servers\" not found or not a string in OctopusDriver configuration"};
