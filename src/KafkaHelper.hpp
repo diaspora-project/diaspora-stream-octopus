@@ -77,30 +77,30 @@ static inline void setupAwsMskIamAuth(rd_kafka_conf_t* conf, const std::string& 
 /**
  * @brief Configures AWS MSK IAM authentication if enabled in the configuration.
  *
- * This function checks if the Kafka configuration contains AWS MSK IAM settings
+ * This function checks if the top-level configuration contains AWS MSK IAM settings
  * and applies them if present. The configuration should contain an "aws_msk_iam"
- * object with a "region" field.
+ * object with a "region" field at the top level.
  *
  * Example configuration:
  * {
  *   "kafka": {
- *     "bootstrap.servers": "...",
- *     "aws_msk_iam": {
- *       "region": "us-east-1"
- *     }
+ *     "bootstrap.servers": "..."
+ *   },
+ *   "aws_msk_iam": {
+ *     "region": "us-east-1"
  *   }
  * }
  *
  * @param conf The rd_kafka_conf_t to configure
- * @param kafka_config The JSON configuration object containing Kafka settings
+ * @param config The top-level JSON configuration object
  */
-static inline void applyAwsAuthIfConfigured(rd_kafka_conf_t* conf, const nlohmann::json& kafka_config) {
+static inline void applyAwsAuthIfConfigured(rd_kafka_conf_t* conf, const nlohmann::json& config) {
 #ifdef OCTOPUS_HAS_AWS
-    if (kafka_config.is_object() &&
-        kafka_config.contains("aws_msk_iam") &&
-        kafka_config["aws_msk_iam"].is_object()) {
+    if (config.is_object() &&
+        config.contains("aws_msk_iam") &&
+        config["aws_msk_iam"].is_object()) {
 
-        const auto& aws_config = kafka_config["aws_msk_iam"];
+        const auto& aws_config = config["aws_msk_iam"];
 
         if (aws_config.contains("region") && aws_config["region"].is_string()) {
             std::string region = aws_config["region"].get<std::string>();
@@ -121,11 +121,11 @@ static inline void applyAwsAuthIfConfigured(rd_kafka_conf_t* conf, const nlohman
  * only have one partition, since consumption will stop at the first PARTITION_EOF
  * received.
  */
-static inline std::vector<std::string> readFullTopic(std::string_view name, const nlohmann::json& kafka_config) {
+static inline std::vector<std::string> readFullTopic(std::string_view name, const nlohmann::json& config) {
 
     char errstr[512];
 
-    KafkaConf conf{kafka_config};
+    KafkaConf conf{config["kafka"]};
     uuid_t consumer_uuid;
     uuid_generate(consumer_uuid);
     char group_id[37] =  {0};
@@ -136,7 +136,7 @@ static inline std::vector<std::string> readFullTopic(std::string_view name, cons
     conf["enable.partition.eof"] = "true";
 
     auto kconf = conf.dup();
-    applyAwsAuthIfConfigured(kconf, kafka_config);
+    applyAwsAuthIfConfigured(kconf, config);
 
     auto consumer = rd_kafka_new(RD_KAFKA_CONSUMER, kconf, errstr, sizeof(errstr));
     if (!consumer) {
@@ -205,16 +205,16 @@ static inline std::vector<std::string> readFullTopic(std::string_view name, cons
  * @brief Returns the last (high watermark) offset for a given topic.
  * This assumes the topic has exactly one partition (partition 0).
  */
-static inline int64_t getNumEventsInPartition(const nlohmann::json& kafka_config,
+static inline int64_t getNumEventsInPartition(const nlohmann::json& config,
                                               const std::string& topic,
                                               int timeout_ms = 5000)
 {
     char errstr[512];
 
     // Create a temporary Kafka handle (producer works fine)
-    KafkaConf kconf{kafka_config};
+    KafkaConf kconf{config["kafka"]};
     rd_kafka_conf_t *conf = kconf.dup();
-    applyAwsAuthIfConfigured(conf, kafka_config);
+    applyAwsAuthIfConfigured(conf, config);
     rd_kafka_t *rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
     if (!rk) {
         rd_kafka_conf_destroy(conf);

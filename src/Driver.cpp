@@ -42,7 +42,7 @@ void OctopusDriver::createTopic(std::string_view name,
     // Create a producer instance
     char errstr[512];
     auto conf = kconf.dup(); // rd_kafka_new will take ownership if successful
-    applyAwsAuthIfConfigured(conf, m_options.json()["kafka"]);
+    applyAwsAuthIfConfigured(conf, m_options.json());
     auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
     if (!rk) {
         rd_kafka_conf_destroy(conf);
@@ -149,7 +149,7 @@ std::shared_ptr<diaspora::TopicHandleInterface> OctopusDriver::openTopic(
     // Create a consumer for the info topic
     auto info_topic_name = "__info_"s + std::string{name};
     // Get info from topic
-    auto info_vector = readFullTopic(info_topic_name, m_options.json()["kafka"]);
+    auto info_vector = readFullTopic(info_topic_name, m_options.json());
     if(info_vector.size() < 3)
         throw diaspora::Exception{"Information about topic not complete in " + info_topic_name};
     auto validator = diaspora::Validator::FromMetadata(info_vector[0]);
@@ -160,7 +160,7 @@ std::shared_ptr<diaspora::TopicHandleInterface> OctopusDriver::openTopic(
     char errstr[512];
     auto kconf = KafkaConf{m_options.json()["kafka"]};
     auto conf = kconf.dup();
-    applyAwsAuthIfConfigured(conf, m_options.json()["kafka"]);
+    applyAwsAuthIfConfigured(conf, m_options.json());
     auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
     auto _rk = std::shared_ptr<rd_kafka_s>{rk, rd_kafka_destroy};
     if (!rk) {
@@ -228,7 +228,7 @@ bool OctopusDriver::topicExists(std::string_view name) const {
     char errstr[512];
 
     auto kconf = KafkaConf{m_options.json()["kafka"]}.dup();
-    applyAwsAuthIfConfigured(kconf, m_options.json()["kafka"]);
+    applyAwsAuthIfConfigured(kconf, m_options.json());
 
     auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, kconf, errstr, sizeof(errstr));
     if (!rk) {
@@ -291,7 +291,7 @@ std::unordered_map<std::string, diaspora::Metadata> OctopusDriver::listTopics() 
 
     auto kconf = KafkaConf{m_options.json()["kafka"]};
     auto conf = kconf.dup();
-    applyAwsAuthIfConfigured(conf, m_options.json()["kafka"]);
+    applyAwsAuthIfConfigured(conf, m_options.json());
     auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
     if (!rk) {
         rd_kafka_conf_destroy(conf);
@@ -333,7 +333,7 @@ std::unordered_map<std::string, diaspora::Metadata> OctopusDriver::listTopics() 
         auto info_topic_name = "__info_"s + topic_name;
 
         try {
-            auto info_vector = readFullTopic(info_topic_name, m_options.json()["kafka"]);
+            auto info_vector = readFullTopic(info_topic_name, m_options.json());
             if (info_vector.size() >= 3) {
                 // We have valid metadata - construct the metadata JSON
                 nlohmann::json metadata_json;

@@ -33,7 +33,7 @@ OctopusTopicHandle::makeProducer(std::string_view name,
     // Create a producer instance
     char errstr[512];
     auto conf = kconf.dup(); // rd_kafka_new will take ownership if successful
-    applyAwsAuthIfConfigured(conf, m_driver->m_options.json()["kafka"]);
+    applyAwsAuthIfConfigured(conf, m_driver->m_options.json());
     auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
     if (!rk) {
         rd_kafka_conf_destroy(conf);
@@ -97,7 +97,7 @@ OctopusTopicHandle::makeConsumer(std::string_view name,
     // Create a consumer instance
     char errstr[512];
     auto conf = kconf.dup(); // rd_kafka_new will take ownership if successful
-    applyAwsAuthIfConfigured(conf, m_driver->m_options.json()["kafka"]);
+    applyAwsAuthIfConfigured(conf, m_driver->m_options.json());
     auto rk = rd_kafka_new(RD_KAFKA_CONSUMER, conf, errstr, sizeof(errstr));
     if (!rk) {
         rd_kafka_conf_destroy(conf);

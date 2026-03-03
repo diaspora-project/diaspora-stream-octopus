@@ -8,15 +8,15 @@ AWS MSK IAM authentication has been integrated throughout the Octopus library. W
 
 ## Configuration
 
-To enable AWS MSK IAM authentication, add an `aws_msk_iam` object to your Kafka configuration with the AWS region:
+To enable AWS MSK IAM authentication, add an `aws_msk_iam` object to your configuration (at the top level, alongside the `kafka` object) with the AWS region:
 
 ```json
 {
   "kafka": {
-    "bootstrap.servers": "your-msk-cluster.kafka.us-east-1.amazonaws.com:9098",
-    "aws_msk_iam": {
-      "region": "us-east-1"
-    }
+    "bootstrap.servers": "your-msk-cluster.kafka.us-east-1.amazonaws.com:9098"
+  },
+  "aws_msk_iam": {
+    "region": "us-east-1"
   }
 }
 ```
@@ -76,10 +76,10 @@ When authentication is configured:
 // Configuration for AWS MSK
 nlohmann::json config = {
     {"kafka", {
-        {"bootstrap.servers", "your-cluster.kafka.us-east-1.amazonaws.com:9098"},
-        {"aws_msk_iam", {
-            {"region", "us-east-1"}
-        }}
+        {"bootstrap.servers", "your-cluster.kafka.us-east-1.amazonaws.com:9098"}
+    }},
+    {"aws_msk_iam", {
+        {"region", "us-east-1"}
     }}
 };
 

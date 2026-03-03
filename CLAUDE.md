@@ -110,7 +110,7 @@ The library implements the Diaspora Streaming API using Apache Kafka as the back
 
 When built with `ENABLE_MSK=ON`, the library supports AWS MSK IAM authentication:
 
-- **Configuration**: Add `"aws_msk_iam": {"region": "us-east-1"}` to the Kafka configuration
+- **Configuration**: Add `"aws_msk_iam": {"region": "us-east-1"}` to the top-level configuration (alongside the `"kafka"` object)
 - **Implementation**: Uses `AwsMskIamSigner` class to generate OAuth bearer tokens
 - **Automatic**: All `rd_kafka_t` instances automatically use authentication when configured
 - **Token Refresh**: Tokens are automatically refreshed by librdkafka (default 900s expiration)
@@ -120,10 +120,10 @@ Example configuration:
 ```json
 {
   "kafka": {
-    "bootstrap.servers": "your-cluster.kafka.us-east-1.amazonaws.com:9098",
-    "aws_msk_iam": {
-      "region": "us-east-1"
-    }
+    "bootstrap.servers": "your-cluster.kafka.us-east-1.amazonaws.com:9098"
+  },
+  "aws_msk_iam": {
+    "region": "us-east-1"
   }
 }
 ```
