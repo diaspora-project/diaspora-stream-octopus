@@ -51,13 +51,14 @@ void OctopusDriver::createTopic(std::string_view name,
     auto _rk = std::shared_ptr<rd_kafka_t>{rk, rd_kafka_destroy};
 
     // Create the NewTopic object for <name> topic
+    auto kafka_name = kafkaTopicName(name);
     auto new_topic = rd_kafka_NewTopic_new(
-        name.data(), num_partitions, replication_factor, errstr, sizeof(errstr));
+        kafka_name.c_str(), num_partitions, replication_factor, errstr, sizeof(errstr));
     if (!new_topic) throw diaspora::Exception{"Failed to create NewTopic object: " + std::string{errstr}};
     auto _new_topic = std::shared_ptr<rd_kafka_NewTopic_s>{new_topic, rd_kafka_NewTopic_destroy};
 
     // Create the NewTopic object for __info_<name> topic
-    auto info_topic_name = "__info_"s + std::string{name};
+    auto info_topic_name = kafkaTopicName("__info_"s + std::string{name});
     auto new_info_topic =
         rd_kafka_NewTopic_new(info_topic_name.data(), 1, replication_factor, errstr, sizeof(errstr));
     if (!new_info_topic) throw diaspora::Exception{"Failed to create NewTopic object: " + std::string{errstr}};
@@ -147,7 +148,8 @@ void OctopusDriver::createTopic(std::string_view name,
 std::shared_ptr<diaspora::TopicHandleInterface> OctopusDriver::openTopic(
         std::string_view name) const {
     // Create a consumer for the info topic
-    auto info_topic_name = "__info_"s + std::string{name};
+    auto kafka_name = kafkaTopicName(name);
+    auto info_topic_name = kafkaTopicName("__info_"s + std::string{name});
     // Get info from topic
     auto info_vector = readFullTopic(info_topic_name, m_options.json());
     if(info_vector.size() < 3)
@@ -174,7 +176,7 @@ std::shared_ptr<diaspora::TopicHandleInterface> OctopusDriver::openTopic(
     rd_kafka_resp_err_t err = rd_kafka_metadata(
         rk,                      // Kafka handle
         0,                       // all_topics=0 means only this topic
-        rd_kafka_topic_new(rk, name.data(), nullptr), // topic handle
+        rd_kafka_topic_new(rk, kafka_name.c_str(), nullptr), // topic handle
         &metadata,               // output pointer
         5000                     // timeout in ms
     );
@@ -215,6 +217,7 @@ std::shared_ptr<diaspora::TopicHandleInterface> OctopusDriver::openTopic(
     // Create the topic handle
     return std::make_shared<OctopusTopicHandle>(
         std::string{name},
+        std::move(kafka_name),
         validator,
         selector,
         serializer,
@@ -223,7 +226,8 @@ std::shared_ptr<diaspora::TopicHandleInterface> OctopusDriver::openTopic(
 }
 
 bool OctopusDriver::topicExists(std::string_view name) const {
-    auto info_topic_name = "__info_"s + std::string{name};
+    auto kafka_name = kafkaTopicName(name);
+    auto info_topic_name = kafkaTopicName("__info_"s + std::string{name});
 
     char errstr[512];
 
@@ -248,7 +252,7 @@ bool OctopusDriver::topicExists(std::string_view name) const {
         rd_kafka_queue_destroy};
 
     // Create a topic collection
-    const char* topic_names[] = {name.data(), info_topic_name.data()};
+    const char* topic_names[] = {kafka_name.c_str(), info_topic_name.c_str()};
     auto topic_collection = rd_kafka_TopicCollection_of_topic_names(topic_names, 2);
     if (!topic_collection) throw diaspora::Exception{"Failed to create rd_kafka_TopicCollection_t"};
     auto _topic_collection = std::shared_ptr<rd_kafka_TopicCollection_t>{
@@ -319,21 +323,35 @@ std::unordered_map<std::string, diaspora::Metadata> OctopusDriver::listTopics() 
 
     std::unordered_map<std::string, diaspora::Metadata> result;
 
+    // Determine the prefix to match and strip for namespaced topics
+    auto ns_prefix = m_namespace.empty() ? ""s : m_namespace + ".";
+    auto info_prefix = ns_prefix + "__info_";
+
     // Iterate through all topics
     for (int i = 0; i < metadata->topic_cnt; i++) {
         const rd_kafka_metadata_topic_t &topic = metadata->topics[i];
-        std::string topic_name = topic.topic;
+        std::string kafka_topic_name = topic.topic;
 
-        // Skip __info_ topics (these are internal metadata topics)
-        if (topic_name.rfind("__info_", 0) == 0) {
+        // Skip topics that don't match our namespace prefix
+        if (!ns_prefix.empty() && kafka_topic_name.rfind(ns_prefix, 0) != 0) {
             continue;
         }
 
+        // Skip __info_ topics (these are internal metadata topics)
+        if (kafka_topic_name.rfind(info_prefix, 0) == 0) {
+            continue;
+        }
+
+        // Strip the namespace prefix to get the user-facing topic name
+        auto user_topic_name = ns_prefix.empty()
+            ? kafka_topic_name
+            : kafka_topic_name.substr(ns_prefix.size());
+
         // Try to read the info topic for this topic
-        auto info_topic_name = "__info_"s + topic_name;
+        auto info_kafka_name = info_prefix + user_topic_name;
 
         try {
-            auto info_vector = readFullTopic(info_topic_name, m_options.json());
+            auto info_vector = readFullTopic(info_kafka_name, m_options.json());
             if (info_vector.size() >= 3) {
                 // We have valid metadata - construct the metadata JSON
                 nlohmann::json metadata_json;
@@ -342,7 +360,7 @@ std::unordered_map<std::string, diaspora::Metadata> OctopusDriver::listTopics() 
                 metadata_json["serializer"] = nlohmann::json::parse(info_vector[2]);
                 metadata_json["num_partitions"] = topic.partition_cnt;
 
-                result[topic_name] = diaspora::Metadata{metadata_json};
+                result[user_topic_name] = diaspora::Metadata{metadata_json};
             }
         } catch (...) {
             // If we can't read the info topic, skip this topic
@@ -372,6 +390,9 @@ std::shared_ptr<diaspora::DriverInterface> OctopusDriver::create(const diaspora:
             "OctopusDriver configuration file doesn't have a correct format"
             " (expected a \"kafka\" object field)"};
     auto& kafka_options = config["kafka"];
+    if(config.contains("namespace") && !config["namespace"].is_string())
+        throw diaspora::Exception{
+            "\"namespace\" option should be a string"};
     if(!kafka_options.contains("bootstrap.servers"))
         throw diaspora::Exception{
             "\"bootstrap.servers\" not found or not a string in OctopusDriver configuration"};

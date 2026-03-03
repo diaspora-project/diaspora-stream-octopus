@@ -165,9 +165,12 @@ The driver expects configuration in this format:
   "kafka": {
     "bootstrap.servers": "localhost:9092",
     "other.kafka.property": "value"
-  }
+  },
+  "namespace": "optional-prefix"
 }
 ```
+
+The optional `"namespace"` field (string) prefixes all Kafka topic names with `<namespace>.`. For example, with `"namespace": "abc"`, `createTopic("xyz")` creates Kafka topics `abc.xyz` and `abc.__info_xyz`. This is transparent to the user — the Diaspora API still uses unprefixed topic names.
 
 The `"bootstrap.servers"` property can be:
 - A string: `"host1:9092"`

@@ -17,11 +17,25 @@ class OctopusDriver : public diaspora::DriverInterface,
     std::shared_ptr<diaspora::ThreadPoolInterface> m_default_thread_pool =
         std::make_shared<diaspora::PosixThreadPool>(diaspora::ThreadCount{0});
     const diaspora::Metadata m_options;
+    const std::string m_namespace;
+
+    static std::string extractNamespace(const diaspora::Metadata& options) {
+        auto& config = options.json();
+        if(config.is_object() && config.contains("namespace") && config["namespace"].is_string())
+            return config["namespace"].get<std::string>();
+        return {};
+    }
+
+    std::string kafkaTopicName(std::string_view name) const {
+        if(m_namespace.empty()) return std::string{name};
+        return m_namespace + "." + std::string{name};
+    }
 
     public:
 
     OctopusDriver(const diaspora::Metadata& options)
-    : m_options(options) {}
+    : m_options(options)
+    , m_namespace(extractNamespace(options)) {}
 
     void createTopic(std::string_view name,
                      const diaspora::Metadata& options,

@@ -116,7 +116,7 @@ diaspora::Future<std::optional<diaspora::EventID>> OctopusProducer::push(
                 // send message
                 rd_kafka_resp_err_t err = rd_kafka_producev(
                     m_rk.get(),
-                    RD_KAFKA_V_TOPIC(m_topic->m_name.c_str()),
+                    RD_KAFKA_V_TOPIC(m_topic->m_kafka_name.c_str()),
                     RD_KAFKA_V_VALUE(msg->payload.data(), msg->payload.size()),
                     RD_KAFKA_V_OPAQUE(msg),
                     RD_KAFKA_V_END

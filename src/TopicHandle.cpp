@@ -64,14 +64,14 @@ OctopusTopicHandle::makeConsumer(std::string_view name,
                 rd_kafka_topic_partition_list_new(1),
                 rd_kafka_topic_partition_list_destroy};
         rd_kafka_topic_partition_list_add(
-                topic_list.get(), m_name.c_str(), RD_KAFKA_PARTITION_UA);
+                topic_list.get(), m_kafka_name.c_str(), RD_KAFKA_PARTITION_UA);
     } else {
         topic_list = std::shared_ptr<rd_kafka_topic_partition_list_s>{
                 rd_kafka_topic_partition_list_new(targets.size()),
                 rd_kafka_topic_partition_list_destroy};
         for(auto t : targets) {
             rd_kafka_topic_partition_list_add(
-                    topic_list.get(), m_name.c_str(),
+                    topic_list.get(), m_kafka_name.c_str(),
                     static_cast<int32_t>(t));
         }
     }

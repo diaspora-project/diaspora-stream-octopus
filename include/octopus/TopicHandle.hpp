@@ -21,6 +21,7 @@ class OctopusTopicHandle final : public diaspora::TopicHandleInterface,
     };
 
     const std::string                          m_name;
+    const std::string                          m_kafka_name;
     const std::vector<diaspora::PartitionInfo> m_pinfo;
     const diaspora::Validator                  m_validator;
     const diaspora::PartitionSelector          m_partition_selector;
@@ -31,12 +32,14 @@ class OctopusTopicHandle final : public diaspora::TopicHandleInterface,
 
     OctopusTopicHandle(
         std::string name,
+        std::string kafka_name,
         diaspora::Validator validator,
         diaspora::PartitionSelector partition_selector,
         diaspora::Serializer serializer,
         std::vector<diaspora::PartitionInfo> targets,
         std::shared_ptr<OctopusDriver> driver)
     : m_name{std::move(name)}
+    , m_kafka_name{std::move(kafka_name)}
     , m_pinfo{std::move(targets)}
     , m_validator(std::move(validator))
     , m_partition_selector(std::move(partition_selector))
