@@ -2,7 +2,7 @@
 #include "octopus/KafkaConf.hpp"
 #include "KafkaHelper.hpp"
 #include <algorithm>
-#include <chrono>
+#include <future>
 #include <iostream>
 #include <string>
 
@@ -11,6 +11,66 @@ namespace octopus {
 DIASPORA_REGISTER_DRIVER(octopus, octopus, OctopusDriver);
 
 using namespace std::string_literals;
+
+/**
+ * @brief Result of an admin operation, extracted from the rd_kafka_event_t
+ * inside the background event callback.
+ */
+struct AdminResult {
+    rd_kafka_event_type_t event_type = RD_KAFKA_EVENT_NONE;
+    struct TopicResult {
+        rd_kafka_resp_err_t err;
+        std::string error_string;
+    };
+    std::vector<TopicResult> topic_results;
+};
+
+/**
+ * @brief Background event callback registered via rd_kafka_conf_set_background_event_cb.
+ * Extracts admin operation results from the event and fulfills the promise
+ * passed via rd_kafka_AdminOptions_set_opaque.
+ */
+static void adminBackgroundCb(rd_kafka_t* /*rk*/, rd_kafka_event_t* rkev, void* /*opaque*/) {
+    auto* promise = static_cast<std::promise<AdminResult>*>(rd_kafka_event_opaque(rkev));
+    if (!promise) return;
+
+    AdminResult result;
+    result.event_type = rd_kafka_event_type(rkev);
+
+    switch (result.event_type) {
+        case RD_KAFKA_EVENT_CREATETOPICS_RESULT: {
+            size_t cnt;
+            auto topics = rd_kafka_CreateTopics_result_topics(
+                rd_kafka_event_CreateTopics_result(rkev), &cnt);
+            for (size_t i = 0; i < cnt; i++) {
+                result.topic_results.push_back({
+                    rd_kafka_topic_result_error(topics[i]),
+                    rd_kafka_err2str(rd_kafka_topic_result_error(topics[i]))});
+            }
+            break;
+        }
+        case RD_KAFKA_EVENT_DESCRIBETOPICS_RESULT: {
+            size_t cnt;
+            auto topics = rd_kafka_DescribeTopics_result_topics(
+                rd_kafka_event_DescribeTopics_result(rkev), &cnt);
+            for (size_t i = 0; i < cnt; i++) {
+                auto err = rd_kafka_TopicDescription_error(topics[i]);
+                if (err) {
+                    result.topic_results.push_back({
+                        rd_kafka_error_code(err),
+                        rd_kafka_error_string(err) ? rd_kafka_error_string(err) : ""});
+                } else {
+                    result.topic_results.push_back({RD_KAFKA_RESP_ERR_NO_ERROR, ""});
+                }
+            }
+            break;
+        }
+        default:
+            break;
+    }
+
+    promise->set_value(std::move(result));
+}
 
 void OctopusDriver::createTopic(std::string_view name,
                                 const diaspora::Metadata& options,
@@ -66,6 +126,7 @@ void OctopusDriver::createTopic(std::string_view name,
     char errstr[512];
     auto conf = kconf.dup(); // rd_kafka_new will take ownership if successful
     applyAwsAuthIfConfigured(conf, m_options.json());
+    rd_kafka_conf_set_background_event_cb(conf, adminBackgroundCb);
     auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
     if (!rk) {
         rd_kafka_conf_destroy(conf);
@@ -80,19 +141,25 @@ void OctopusDriver::createTopic(std::string_view name,
     if (!new_topic) throw diaspora::Exception{"Failed to create NewTopic object: " + std::string{errstr}};
     auto _new_topic = std::shared_ptr<rd_kafka_NewTopic_s>{new_topic, rd_kafka_NewTopic_destroy};
 
+    // Set up promise/future for the background callback
+    std::promise<AdminResult> promise;
+    auto future = promise.get_future();
+
     // Create an admin options object
     auto admin_options = rd_kafka_AdminOptions_new(rk, RD_KAFKA_ADMIN_OP_CREATETOPICS);
     if (!admin_options) throw diaspora::Exception{"Failed to create rd_kafka_AdminOptions_t"};
     auto _admin_options = std::shared_ptr<rd_kafka_AdminOptions_s>{admin_options, rd_kafka_AdminOptions_destroy};
+    rd_kafka_AdminOptions_set_opaque(admin_options, &promise);
 
-    // Create a queue for the result of the operation
-    auto queue = std::shared_ptr<rd_kafka_queue_t>{rd_kafka_queue_new(rk), rd_kafka_queue_destroy};
+    // Use librdkafka's background queue — the background thread will
+    // automatically dispatch adminBackgroundCb when the operation completes
+    auto rkqu = rd_kafka_queue_get_background(rk);
 
     std::shared_ptr<rd_kafka_NewTopic_s> _new_info_topic;
     if(disable_info_topic) {
         // Only create the main topic
         rd_kafka_NewTopic_t *new_topics[] = {new_topic};
-        rd_kafka_CreateTopics(rk, new_topics, 1, admin_options, queue.get());
+        rd_kafka_CreateTopics(rk, new_topics, 1, admin_options, rkqu);
     } else {
         // Create both the main topic and the info topic
         auto info_topic_name = kafkaTopicName("__info_"s + std::string{name});
@@ -103,39 +170,29 @@ void OctopusDriver::createTopic(std::string_view name,
         _new_info_topic = std::shared_ptr<rd_kafka_NewTopic_s>{new_info_topic, rd_kafka_NewTopic_destroy};
 
         rd_kafka_NewTopic_t *new_topics[] = {new_topic, new_info_topic};
-        rd_kafka_CreateTopics(rk, new_topics, 2, admin_options, queue.get());
+        rd_kafka_CreateTopics(rk, new_topics, 2, admin_options, rkqu);
     }
 
-    // Poll for the result, driving the event loop in 100ms increments
-    rd_kafka_event_t* event = nullptr;
-    {
-        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
-        while(!event && std::chrono::steady_clock::now() < deadline) {
-            event = rd_kafka_queue_poll(queue.get(), 100);
-        }
-    }
-    if (!event) throw diaspora::Exception{"Timed out waiting for CreateTopics result"};
-    auto _event = std::shared_ptr<rd_kafka_event_t>{event, rd_kafka_event_destroy};
+    rd_kafka_queue_destroy(rkqu); // drop reference from get_background
+
+    // Wait for the background callback to deliver the result
+    if (future.wait_for(std::chrono::seconds(60)) == std::future_status::timeout)
+        throw diaspora::Exception{"Timed out waiting for CreateTopics result"};
+    auto admin_result = future.get();
 
     // Check if the event type is CreateTopics result
-    if (rd_kafka_event_type(event) != RD_KAFKA_EVENT_CREATETOPICS_RESULT)
+    if (admin_result.event_type != RD_KAFKA_EVENT_CREATETOPICS_RESULT)
         throw diaspora::Exception{"Unexpected event type when waiting for CreateTopics"};
 
-    // Extract the result from the event
-    auto result = rd_kafka_event_CreateTopics_result(event);
-    size_t topic_count;
-    auto topics_result = rd_kafka_CreateTopics_result_topics(result, &topic_count);
+    // Check the results for errors
     size_t expected_topic_count = disable_info_topic ? 1 : 2;
-    if (topic_count != expected_topic_count)
+    if (admin_result.topic_results.size() != expected_topic_count)
         throw diaspora::Exception{
             "Invalid number of topic results returned by rd_kafka_CreateTopics_result_topics"};
 
-    // Check the results for errors
-    for (size_t i = 0; i < topic_count; i++) {
-        const rd_kafka_topic_result_t *topic_result = topics_result[i];
-        if (rd_kafka_topic_result_error(topic_result) != RD_KAFKA_RESP_ERR_NO_ERROR) {
-            throw diaspora::Exception{"Failed to create topic: "
-                + std::string{rd_kafka_err2str(rd_kafka_topic_result_error(topic_result))}};
+    for (auto& tr : admin_result.topic_results) {
+        if (tr.err != RD_KAFKA_RESP_ERR_NO_ERROR) {
+            throw diaspora::Exception{"Failed to create topic: " + tr.error_string};
         }
     }
 
@@ -282,25 +339,27 @@ bool OctopusDriver::topicExists(std::string_view name) const {
 
     char errstr[512];
 
-    auto kconf = KafkaConf{m_options.json()["kafka"]}.dup();
-    applyAwsAuthIfConfigured(kconf, m_options.json());
+    KafkaConf kconf{m_options.json()["kafka"]};
+    auto conf = kconf.dup();
+    applyAwsAuthIfConfigured(conf, m_options.json());
+    rd_kafka_conf_set_background_event_cb(conf, adminBackgroundCb);
 
-    auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, kconf, errstr, sizeof(errstr));
+    auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
     if (!rk) {
-        rd_kafka_conf_destroy(kconf);
+        rd_kafka_conf_destroy(conf);
         throw diaspora::Exception{"Could not create rd_kafka_t instance: " + std::string{errstr}};
     }
     auto _rk = std::shared_ptr<rd_kafka_t>{rk, rd_kafka_destroy};
+
+    // Set up promise/future for the background callback
+    std::promise<AdminResult> promise;
+    auto future = promise.get_future();
 
     // Create an admin options object
     auto admin_options = rd_kafka_AdminOptions_new(rk, RD_KAFKA_ADMIN_OP_DESCRIBETOPICS);
     if (!admin_options) throw diaspora::Exception{"Failed to create rd_kafka_AdminOptions_t"};
     auto _admin_options = std::shared_ptr<rd_kafka_AdminOptions_s>{admin_options, rd_kafka_AdminOptions_destroy};
-
-    // Create a queue for the result of the operation
-    auto queue = std::shared_ptr<rd_kafka_queue_t>{
-        rd_kafka_queue_new(rk),
-        rd_kafka_queue_destroy};
+    rd_kafka_AdminOptions_set_opaque(admin_options, &promise);
 
     // Create a topic collection
     const char* topic_names[] = {kafka_name.c_str()};
@@ -309,38 +368,30 @@ bool OctopusDriver::topicExists(std::string_view name) const {
     auto _topic_collection = std::shared_ptr<rd_kafka_TopicCollection_t>{
         topic_collection, rd_kafka_TopicCollection_destroy};
 
-    // Initiate the topic description
-    rd_kafka_DescribeTopics(rk, topic_collection, admin_options, queue.get());
+    // Use librdkafka's background queue — the background thread will
+    // automatically dispatch adminBackgroundCb when the operation completes
+    auto rkqu = rd_kafka_queue_get_background(rk);
+    rd_kafka_DescribeTopics(rk, topic_collection, admin_options, rkqu);
+    rd_kafka_queue_destroy(rkqu);
 
-    // Poll for the result, driving the event loop in 100ms increments
-    rd_kafka_event_t* event = nullptr;
-    {
-        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
-        while(!event && std::chrono::steady_clock::now() < deadline) {
-            event = rd_kafka_queue_poll(queue.get(), 100);
-        }
-    }
-    if (!event) throw diaspora::Exception{"Timed out waiting for DescribeTopics result"};
-    auto _event = std::shared_ptr<rd_kafka_event_t>{event, rd_kafka_event_destroy};
+    // Wait for the background callback to deliver the result
+    if (future.wait_for(std::chrono::seconds(60)) == std::future_status::timeout)
+        throw diaspora::Exception{"Timed out waiting for DescribeTopics result"};
+    auto admin_result = future.get();
 
     // Check if the event type is DescribeTopics result
-    if (rd_kafka_event_type(event) != RD_KAFKA_EVENT_DESCRIBETOPICS_RESULT)
+    if (admin_result.event_type != RD_KAFKA_EVENT_DESCRIBETOPICS_RESULT)
         throw diaspora::Exception{"Unexpected event type when waiting for DescribeTopics"};
 
-    // Extract the result from the event
-    auto result = rd_kafka_event_DescribeTopics_result(event);
-    size_t topic_count;
-    auto topics_result = rd_kafka_DescribeTopics_result_topics(result, &topic_count);
-    if (topic_count != 1)
+    // Check the result
+    if (admin_result.topic_results.size() != 1)
         throw diaspora::Exception{
             "Invalid number of topic results returned by rd_kafka_DescribeTopics_result_topics"};
 
-    auto err = rd_kafka_TopicDescription_error(topics_result[0]);
-    if (!err) return true;
-    if (rd_kafka_error_code(err) == RD_KAFKA_RESP_ERR_UNKNOWN_TOPIC_OR_PART)
-        return false;
-    throw diaspora::Exception{"Failed to describe topic: "
-        + std::string{rd_kafka_error_string(err)}};
+    auto& tr = admin_result.topic_results[0];
+    if (tr.err == RD_KAFKA_RESP_ERR_NO_ERROR) return true;
+    if (tr.err == RD_KAFKA_RESP_ERR_UNKNOWN_TOPIC_OR_PART) return false;
+    throw diaspora::Exception{"Failed to describe topic: " + tr.error_string};
 }
 
 std::unordered_map<std::string, diaspora::Metadata> OctopusDriver::listTopics() const {
