@@ -299,12 +299,10 @@ int main(int argc, char* argv[]) {
             auto ns = req.path_params.at("namespace");
             auto topic = req.path_params.at("topic");
 
-            std::string main_topic = ns + "." + topic;
-            std::string info_topic = ns + ".__info_" + topic;
+            std::string kafka_topic = ns + "." + topic;
 
             createKafkaTopics(kafka_bootstrap, {
-                {main_topic, 1, 1},
-                {info_topic, 1, 1}
+                {kafka_topic, 1, 1}
             });
 
             auto ns_topics = listTopicsInNamespace(kafka_bootstrap, ns);
@@ -325,10 +323,9 @@ int main(int argc, char* argv[]) {
             auto ns = req.path_params.at("namespace");
             auto topic = req.path_params.at("topic");
 
-            std::string main_topic = ns + "." + topic;
-            std::string info_topic = ns + ".__info_" + topic;
+            std::string kafka_topic = ns + "." + topic;
 
-            deleteKafkaTopics(kafka_bootstrap, {main_topic, info_topic});
+            deleteKafkaTopics(kafka_bootstrap, {kafka_topic});
 
             auto ns_topics = listTopicsInNamespace(kafka_bootstrap, ns);
             std::string msg = "Topic " + topic + " deleted from " + ns;
@@ -348,13 +345,11 @@ int main(int argc, char* argv[]) {
             auto ns = req.path_params.at("namespace");
             auto topic = req.path_params.at("topic");
 
-            std::string main_topic = ns + "." + topic;
-            std::string info_topic = ns + ".__info_" + topic;
+            std::string kafka_topic = ns + "." + topic;
 
-            deleteKafkaTopics(kafka_bootstrap, {main_topic, info_topic});
+            deleteKafkaTopics(kafka_bootstrap, {kafka_topic});
             createKafkaTopics(kafka_bootstrap, {
-                {main_topic, 1, 1},
-                {info_topic, 1, 1}
+                {kafka_topic, 1, 1}
             });
 
             json response = {{"status", "success"}, {"message", "Topic recreated"}};

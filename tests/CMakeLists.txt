@@ -7,13 +7,13 @@ target_link_libraries (mocktopus
 set (OCTOPUS_TEST_BACKEND_ARGS "{\"kafka\":{\"bootstrap.servers\":\"localhost:9092\"}}")
 set (OCTOPUS_TEST_TOPIC_ARGS "{\"replication_factor\":1}")
 
-add_test (NAME DiasporaTestSuite COMMAND
+add_test (NAME KafkaDiasporaTestSuite COMMAND
           diaspora-run-tests.sh octopus
                                 --before ${CMAKE_CURRENT_SOURCE_DIR}/pre-test.sh
                                 --after ${CMAKE_CURRENT_SOURCE_DIR}/post-test.sh
                                 --backend-args ${OCTOPUS_TEST_BACKEND_ARGS}
                                 --topic-args ${OCTOPUS_TEST_TOPIC_ARGS})
-set_property (TEST DiasporaTestSuite PROPERTY
+set_property (TEST KafkaDiasporaTestSuite PROPERTY
               ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/src:$ENV{LD_LIBRARY_PATH}")
 
 add_test (NAME OctopusBenchmark COMMAND
@@ -22,6 +22,20 @@ set_property (TEST OctopusBenchmark PROPERTY
               ENVIRONMENT
               "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/src:$ENV{LD_LIBRARY_PATH}"
               "PYTHONPATH=${CMAKE_SOURCE_DIR}/python/:${CMAKE_BINARY_DIR}/python:$ENV{PYTHONPATH}")
+
+set (OCTOPUS_ADMIN_BACKEND_ARGS "{\"kafka\":{\"bootstrap.servers\":\"localhost:9092\"},\"namespace\":\"test-ns\",\"octopus\":{\"subject\":\"unused\",\"authorization\":\"unused\",\"url\":\"http://localhost:18080\"}}")
+set (OCTOPUS_ADMIN_TOPIC_ARGS "{\"replication_factor\":1}")
+
+add_test (NAME OctopusDiasporaTestSuite COMMAND
+          diaspora-run-tests.sh octopus
+                                --before ${CMAKE_CURRENT_SOURCE_DIR}/mocktopus-pre-test.sh
+                                --after ${CMAKE_CURRENT_SOURCE_DIR}/mocktopus-post-test.sh
+                                --backend-args ${OCTOPUS_ADMIN_BACKEND_ARGS}
+                                --topic-args ${OCTOPUS_ADMIN_TOPIC_ARGS})
+set_property (TEST OctopusDiasporaTestSuite PROPERTY
+              ENVIRONMENT
+              "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/src:$ENV{LD_LIBRARY_PATH}"
+              "MOCKTOPUS_BIN=${CMAKE_BINARY_DIR}/tests/mocktopus")
 
 add_test (NAME MocktopusTest COMMAND
           ${CMAKE_CURRENT_SOURCE_DIR}/run-mocktopus-tests.sh)

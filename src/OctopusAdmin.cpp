@@ -2,6 +2,7 @@
 #include <diaspora/Exception.hpp>
 #include <curl/curl.h>
 #include <algorithm>
+#include <cstdlib>
 
 namespace octopus {
 
@@ -25,13 +26,29 @@ OctopusAdmin::OctopusAdmin(const nlohmann::json& config, std::string ns)
 
     auto& octopus_config = config["octopus"];
 
-    if(!octopus_config.contains("subject") || !octopus_config["subject"].is_string())
-        throw diaspora::Exception{"OctopusAdmin requires a \"subject\" field in the \"octopus\" configuration"};
-    if(!octopus_config.contains("authorization") || !octopus_config["authorization"].is_string())
-        throw diaspora::Exception{"OctopusAdmin requires an \"authorization\" field in the \"octopus\" configuration"};
+    if(octopus_config.contains("subject_env") && octopus_config["subject_env"].is_string()) {
+        auto env_var = octopus_config["subject_env"].get<std::string>();
+        auto* val = std::getenv(env_var.c_str());
+        if(!val)
+            throw diaspora::Exception{"Environment variable \"" + env_var + "\" (from subject_env) is not set"};
+        m_subject = val;
+    } else if(octopus_config.contains("subject") && octopus_config["subject"].is_string()) {
+        m_subject = octopus_config["subject"].get<std::string>();
+    } else {
+        throw diaspora::Exception{"OctopusAdmin requires a \"subject\" or \"subject_env\" field in the \"octopus\" configuration"};
+    }
 
-    m_subject = octopus_config["subject"].get<std::string>();
-    m_authorization = octopus_config["authorization"].get<std::string>();
+    if(octopus_config.contains("authorization_env") && octopus_config["authorization_env"].is_string()) {
+        auto env_var = octopus_config["authorization_env"].get<std::string>();
+        auto* val = std::getenv(env_var.c_str());
+        if(!val)
+            throw diaspora::Exception{"Environment variable \"" + env_var + "\" (from authorization_env) is not set"};
+        m_authorization = val;
+    } else if(octopus_config.contains("authorization") && octopus_config["authorization"].is_string()) {
+        m_authorization = octopus_config["authorization"].get<std::string>();
+    } else {
+        throw diaspora::Exception{"OctopusAdmin requires an \"authorization\" or \"authorization_env\" field in the \"octopus\" configuration"};
+    }
 
     if(octopus_config.contains("url") && octopus_config["url"].is_string())
         m_url = octopus_config["url"].get<std::string>();

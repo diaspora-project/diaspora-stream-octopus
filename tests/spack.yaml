@@ -7,6 +7,8 @@ spack:
   - uuid
   - aws-sdk-cpp
   - openssl
+  - curl
+  - cpp-httplib
   - kafka
   concretizer:
     unify: true
