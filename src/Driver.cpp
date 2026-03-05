@@ -1,8 +1,6 @@
 #include "octopus/Driver.hpp"
-#include "octopus/KafkaConf.hpp"
-#include "KafkaHelper.hpp"
+#include "LibRdKafkaAdmin.hpp"
 #include <algorithm>
-#include <future>
 #include <iostream>
 #include <string>
 
@@ -12,65 +10,21 @@ DIASPORA_REGISTER_DRIVER(octopus, octopus, OctopusDriver);
 
 using namespace std::string_literals;
 
-/**
- * @brief Result of an admin operation, extracted from the rd_kafka_event_t
- * inside the background event callback.
- */
-struct AdminResult {
-    rd_kafka_event_type_t event_type = RD_KAFKA_EVENT_NONE;
-    struct TopicResult {
-        rd_kafka_resp_err_t err;
-        std::string error_string;
-    };
-    std::vector<TopicResult> topic_results;
-};
-
-/**
- * @brief Background event callback registered via rd_kafka_conf_set_background_event_cb.
- * Extracts admin operation results from the event and fulfills the promise
- * passed via rd_kafka_AdminOptions_set_opaque.
- */
-static void adminBackgroundCb(rd_kafka_t* /*rk*/, rd_kafka_event_t* rkev, void* /*opaque*/) {
-    auto* promise = static_cast<std::promise<AdminResult>*>(rd_kafka_event_opaque(rkev));
-    if (!promise) return;
-
-    AdminResult result;
-    result.event_type = rd_kafka_event_type(rkev);
-
-    switch (result.event_type) {
-        case RD_KAFKA_EVENT_CREATETOPICS_RESULT: {
-            size_t cnt;
-            auto topics = rd_kafka_CreateTopics_result_topics(
-                rd_kafka_event_CreateTopics_result(rkev), &cnt);
-            for (size_t i = 0; i < cnt; i++) {
-                result.topic_results.push_back({
-                    rd_kafka_topic_result_error(topics[i]),
-                    rd_kafka_err2str(rd_kafka_topic_result_error(topics[i]))});
-            }
-            break;
-        }
-        case RD_KAFKA_EVENT_DESCRIBETOPICS_RESULT: {
-            size_t cnt;
-            auto topics = rd_kafka_DescribeTopics_result_topics(
-                rd_kafka_event_DescribeTopics_result(rkev), &cnt);
-            for (size_t i = 0; i < cnt; i++) {
-                auto err = rd_kafka_TopicDescription_error(topics[i]);
-                if (err) {
-                    result.topic_results.push_back({
-                        rd_kafka_error_code(err),
-                        rd_kafka_error_string(err) ? rd_kafka_error_string(err) : ""});
-                } else {
-                    result.topic_results.push_back({RD_KAFKA_RESP_ERR_NO_ERROR, ""});
-                }
-            }
-            break;
-        }
-        default:
-            break;
-    }
-
-    promise->set_value(std::move(result));
+static std::string extractNamespace(const diaspora::Metadata& options) {
+    auto& config = options.json();
+    if(config.is_object() && config.contains("namespace") && config["namespace"].is_string())
+        return config["namespace"].get<std::string>();
+    return {};
 }
+
+OctopusDriver::OctopusDriver(const diaspora::Metadata& options)
+: m_options(options)
+, m_namespace(extractNamespace(options))
+, m_disable_info_topic(extractDisableInfoTopic(options))
+, m_admin(std::make_unique<LibRdKafkaAdmin>(options.json(), m_namespace))
+{}
+
+OctopusDriver::~OctopusDriver() = default;
 
 void OctopusDriver::createTopic(std::string_view name,
                                 const diaspora::Metadata& options,
@@ -79,8 +33,6 @@ void OctopusDriver::createTopic(std::string_view name,
                                 std::shared_ptr<diaspora::SerializerInterface> serializer) {
     if(!options.json().is_object())
         throw diaspora::Exception{"Invalid config passed to OctopusDriver::createTopic: should be an object"};
-
-    KafkaConf kconf{m_options.json()["kafka"]};
 
     // Get the options
     size_t num_partitions = 1;
@@ -122,195 +74,54 @@ void OctopusDriver::createTopic(std::string_view name,
                 "Cannot disable info topic: serializer type is not \"default\""};
     }
 
-    // Create a producer instance
-    char errstr[512];
-    auto conf = kconf.dup(); // rd_kafka_new will take ownership if successful
-    applyAwsAuthIfConfigured(conf, m_options.json());
-    rd_kafka_conf_set_background_event_cb(conf, adminBackgroundCb);
-    auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
-    if (!rk) {
-        rd_kafka_conf_destroy(conf);
-        throw diaspora::Exception{"Could not create rd_kafka_t instance: " + std::string{errstr}};
-    }
-    auto _rk = std::shared_ptr<rd_kafka_t>{rk, rd_kafka_destroy};
-
-    // Create the NewTopic object for <name> topic
-    auto kafka_name = kafkaTopicName(name);
-    auto new_topic = rd_kafka_NewTopic_new(
-        kafka_name.c_str(), num_partitions, replication_factor, errstr, sizeof(errstr));
-    if (!new_topic) throw diaspora::Exception{"Failed to create NewTopic object: " + std::string{errstr}};
-    auto _new_topic = std::shared_ptr<rd_kafka_NewTopic_s>{new_topic, rd_kafka_NewTopic_destroy};
-
-    // Set up promise/future for the background callback
-    std::promise<AdminResult> promise;
-    auto future = promise.get_future();
-
-    // Create an admin options object
-    auto admin_options = rd_kafka_AdminOptions_new(rk, RD_KAFKA_ADMIN_OP_CREATETOPICS);
-    if (!admin_options) throw diaspora::Exception{"Failed to create rd_kafka_AdminOptions_t"};
-    auto _admin_options = std::shared_ptr<rd_kafka_AdminOptions_s>{admin_options, rd_kafka_AdminOptions_destroy};
-    rd_kafka_AdminOptions_set_opaque(admin_options, &promise);
-
-    // Use librdkafka's background queue — the background thread will
-    // automatically dispatch adminBackgroundCb when the operation completes
-    auto rkqu = rd_kafka_queue_get_background(rk);
-
-    std::shared_ptr<rd_kafka_NewTopic_s> _new_info_topic;
-    if(disable_info_topic) {
-        // Only create the main topic
-        rd_kafka_NewTopic_t *new_topics[] = {new_topic};
-        rd_kafka_CreateTopics(rk, new_topics, 1, admin_options, rkqu);
-    } else {
-        // Create both the main topic and the info topic
-        auto info_topic_name = kafkaTopicName("__info_"s + std::string{name});
-        auto new_info_topic =
-            rd_kafka_NewTopic_new(info_topic_name.data(), 1, replication_factor, errstr, sizeof(errstr));
-        if (!new_info_topic)
-            throw diaspora::Exception{"Failed to create NewTopic object: " + std::string{errstr}};
-        _new_info_topic = std::shared_ptr<rd_kafka_NewTopic_s>{new_info_topic, rd_kafka_NewTopic_destroy};
-
-        rd_kafka_NewTopic_t *new_topics[] = {new_topic, new_info_topic};
-        rd_kafka_CreateTopics(rk, new_topics, 2, admin_options, rkqu);
+    // Build topic specs
+    std::vector<Admin::TopicSpec> topic_specs;
+    topic_specs.push_back({std::string{name}, num_partitions, replication_factor});
+    if(!disable_info_topic) {
+        topic_specs.push_back({"__info_"s + std::string{name}, 1, replication_factor});
     }
 
-    rd_kafka_queue_destroy(rkqu); // drop reference from get_background
-
-    // Wait for the background callback to deliver the result
-    if (future.wait_for(std::chrono::seconds(60)) == std::future_status::timeout)
-        throw diaspora::Exception{"Timed out waiting for CreateTopics result"};
-    auto admin_result = future.get();
-
-    // Check if the event type is CreateTopics result
-    if (admin_result.event_type != RD_KAFKA_EVENT_CREATETOPICS_RESULT)
-        throw diaspora::Exception{"Unexpected event type when waiting for CreateTopics"};
-
-    // Check the results for errors
-    size_t expected_topic_count = disable_info_topic ? 1 : 2;
-    if (admin_result.topic_results.size() != expected_topic_count)
-        throw diaspora::Exception{
-            "Invalid number of topic results returned by rd_kafka_CreateTopics_result_topics"};
-
-    for (auto& tr : admin_result.topic_results) {
-        if (tr.err != RD_KAFKA_RESP_ERR_NO_ERROR) {
-            throw diaspora::Exception{"Failed to create topic: " + tr.error_string};
-        }
-    }
+    m_admin->createTopics(topic_specs);
 
     if(!disable_info_topic) {
-        auto info_topic_name = kafkaTopicName("__info_"s + std::string{name});
+        auto info_topic_name = "__info_"s + std::string{name};
 
-        // Produce the metadata to the info topic
-        auto validator_metadata = validator->metadata().json().dump();
-        rd_kafka_resp_err_t err = rd_kafka_producev(
-            rk,
-            RD_KAFKA_V_TOPIC(info_topic_name.c_str()),
-            RD_KAFKA_V_MSGFLAGS(RD_KAFKA_MSG_F_COPY),
-            RD_KAFKA_V_VALUE(validator_metadata.data(), validator_metadata.size()),
-            RD_KAFKA_V_END);
-        if (err)
-            throw diaspora::Exception{
-                "Failed to produce validator metadata: " + std::string{rd_kafka_err2str(err)}};
+        std::vector<std::string> messages;
+        messages.push_back(validator->metadata().json().dump());
+        messages.push_back(selector->metadata().json().dump());
+        messages.push_back(serializer->metadata().json().dump());
 
-        // Produce the selector metadata
-        auto selector_metadata = selector->metadata().json().dump();
-        err = rd_kafka_producev(
-            rk,
-            RD_KAFKA_V_TOPIC(info_topic_name.c_str()),
-            RD_KAFKA_V_MSGFLAGS(RD_KAFKA_MSG_F_COPY),
-            RD_KAFKA_V_VALUE(selector_metadata.data(), selector_metadata.size()),
-            RD_KAFKA_V_END);
-        if (err)
-            throw diaspora::Exception{
-                "Failed to produce selector metadata: " + std::string{rd_kafka_err2str(err)}};
-
-        // Produce the serializer metadata
-        auto serializer_metadata = serializer->metadata().json().dump();
-        err = rd_kafka_producev(
-            rk,
-            RD_KAFKA_V_TOPIC(info_topic_name.c_str()),
-            RD_KAFKA_V_MSGFLAGS(RD_KAFKA_MSG_F_COPY),
-            RD_KAFKA_V_VALUE(serializer_metadata.data(), serializer_metadata.size()),
-            RD_KAFKA_V_END);
-        if (err)
-            throw diaspora::Exception{
-                "Failed to produce serializer metadata: " + std::string{rd_kafka_err2str(err)}};
-
-        // Flush the producer to ensure the messages are sent
-        err = rd_kafka_flush(rk, 10000);
-        if (err)
-            throw diaspora::Exception{
-                "Failed to flush producer: " + std::string{rd_kafka_err2str(err)}};
+        m_admin->produceMessages(info_topic_name, messages);
     }
 }
 
 std::shared_ptr<diaspora::TopicHandleInterface> OctopusDriver::openTopic(
         std::string_view name) const {
     // Check if the topic exists
-    if(!topicExists(name))
+    if(!m_admin->topicExists(std::string{name}))
         throw diaspora::Exception{std::string{"Topic \""} + std::string{name} + "\" not found"};
 
     auto kafka_name = kafkaTopicName(name);
-    auto info_topic_name = kafkaTopicName("__info_"s + std::string{name});
+    auto info_topic_name = "__info_"s + std::string{name};
+
     // Get info from topic
     diaspora::Validator validator;
     diaspora::PartitionSelector selector;
     diaspora::Serializer serializer;
     try {
-        auto info_vector = readFullTopic(info_topic_name, m_options.json());
+        auto info_vector = m_admin->readFullTopic(info_topic_name);
         if(info_vector.size() < 3)
-            throw diaspora::Exception{"Information about topic not complete in " + info_topic_name};
+            throw diaspora::Exception{"Information about topic not complete in " + kafkaTopicName(info_topic_name)};
         validator = diaspora::Validator::FromMetadata(info_vector[0]);
         selector = diaspora::PartitionSelector::FromMetadata(info_vector[1]);
         serializer = diaspora::Serializer::FromMetadata(info_vector[2]);
     } catch(const diaspora::Exception&) {
-        std::cerr << "[octopus:warning] Could not read info topic " << info_topic_name
+        std::cerr << "[octopus:warning] Could not read info topic " << kafkaTopicName(info_topic_name)
                   << ", using default validator, serializer, and partition selector" << std::endl;
     }
 
     // Get the number of partitions
-    char errstr[512];
-    auto kconf = KafkaConf{m_options.json()["kafka"]};
-    auto conf = kconf.dup();
-    applyAwsAuthIfConfigured(conf, m_options.json());
-    auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
-    auto _rk = std::shared_ptr<rd_kafka_s>{rk, rd_kafka_destroy};
-    if (!rk) {
-        rd_kafka_conf_destroy(conf);
-        throw diaspora::Exception{
-            std::string{"Failed to create Kafka handle: "} + errstr};
-    }
-
-    /* Fetch metadata for the topic */
-    const rd_kafka_metadata_t *metadata;
-    rd_kafka_resp_err_t err = rd_kafka_metadata(
-        rk,                      // Kafka handle
-        0,                       // all_topics=0 means only this topic
-        rd_kafka_topic_new(rk, kafka_name.c_str(), nullptr), // topic handle
-        &metadata,               // output pointer
-        60000                     // timeout in ms
-    );
-
-    if (err != RD_KAFKA_RESP_ERR_NO_ERROR)
-        throw diaspora::Exception{
-            std::string{"Failed to get metadata: "} + rd_kafka_err2str(err)};
-
-    auto _metadata = std::shared_ptr<const rd_kafka_metadata_t>{
-        metadata, rd_kafka_metadata_destroy};
-
-    size_t num_partitions = 0;
-
-    /* Extract partition info */
-    if (metadata->topic_cnt == 0) {
-        throw diaspora::Exception{std::string{"Topic \""} + std::string{name} + "\" not found"};
-    } else {
-        const rd_kafka_metadata_topic_t &topic = metadata->topics[0];
-        if (topic.err != RD_KAFKA_RESP_ERR_NO_ERROR) {
-            throw diaspora::Exception{
-                std::string{"Topic metadata error: "} + rd_kafka_err2str(topic.err)};
-        } else {
-            num_partitions = topic.partition_cnt;
-        }
-    }
+    size_t num_partitions = m_admin->getPartitionCount(std::string{name});
 
     std::vector<diaspora::PartitionInfo> targets;
     targets.reserve(num_partitions);
@@ -335,140 +146,29 @@ std::shared_ptr<diaspora::TopicHandleInterface> OctopusDriver::openTopic(
 }
 
 bool OctopusDriver::topicExists(std::string_view name) const {
-    auto kafka_name = kafkaTopicName(name);
-
-    char errstr[512];
-
-    KafkaConf kconf{m_options.json()["kafka"]};
-    auto conf = kconf.dup();
-    applyAwsAuthIfConfigured(conf, m_options.json());
-    rd_kafka_conf_set_background_event_cb(conf, adminBackgroundCb);
-
-    auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
-    if (!rk) {
-        rd_kafka_conf_destroy(conf);
-        throw diaspora::Exception{"Could not create rd_kafka_t instance: " + std::string{errstr}};
-    }
-    auto _rk = std::shared_ptr<rd_kafka_t>{rk, rd_kafka_destroy};
-
-    // Set up promise/future for the background callback
-    std::promise<AdminResult> promise;
-    auto future = promise.get_future();
-
-    // Create an admin options object
-    auto admin_options = rd_kafka_AdminOptions_new(rk, RD_KAFKA_ADMIN_OP_DESCRIBETOPICS);
-    if (!admin_options) throw diaspora::Exception{"Failed to create rd_kafka_AdminOptions_t"};
-    auto _admin_options = std::shared_ptr<rd_kafka_AdminOptions_s>{admin_options, rd_kafka_AdminOptions_destroy};
-    rd_kafka_AdminOptions_set_opaque(admin_options, &promise);
-
-    // Create a topic collection
-    const char* topic_names[] = {kafka_name.c_str()};
-    auto topic_collection = rd_kafka_TopicCollection_of_topic_names(topic_names, 1);
-    if (!topic_collection) throw diaspora::Exception{"Failed to create rd_kafka_TopicCollection_t"};
-    auto _topic_collection = std::shared_ptr<rd_kafka_TopicCollection_t>{
-        topic_collection, rd_kafka_TopicCollection_destroy};
-
-    // Use librdkafka's background queue — the background thread will
-    // automatically dispatch adminBackgroundCb when the operation completes
-    auto rkqu = rd_kafka_queue_get_background(rk);
-    rd_kafka_DescribeTopics(rk, topic_collection, admin_options, rkqu);
-    rd_kafka_queue_destroy(rkqu);
-
-    // Wait for the background callback to deliver the result
-    if (future.wait_for(std::chrono::seconds(60)) == std::future_status::timeout)
-        throw diaspora::Exception{"Timed out waiting for DescribeTopics result"};
-    auto admin_result = future.get();
-
-    // Check if the event type is DescribeTopics result
-    if (admin_result.event_type != RD_KAFKA_EVENT_DESCRIBETOPICS_RESULT)
-        throw diaspora::Exception{"Unexpected event type when waiting for DescribeTopics"};
-
-    // Check the result
-    if (admin_result.topic_results.size() != 1)
-        throw diaspora::Exception{
-            "Invalid number of topic results returned by rd_kafka_DescribeTopics_result_topics"};
-
-    auto& tr = admin_result.topic_results[0];
-    if (tr.err == RD_KAFKA_RESP_ERR_NO_ERROR) return true;
-    if (tr.err == RD_KAFKA_RESP_ERR_UNKNOWN_TOPIC_OR_PART) return false;
-    throw diaspora::Exception{"Failed to describe topic: " + tr.error_string};
+    return m_admin->topicExists(std::string{name});
 }
 
 std::unordered_map<std::string, diaspora::Metadata> OctopusDriver::listTopics() const {
-    char errstr[512];
-
-    auto kconf = KafkaConf{m_options.json()["kafka"]};
-    auto conf = kconf.dup();
-    applyAwsAuthIfConfigured(conf, m_options.json());
-    auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
-    if (!rk) {
-        rd_kafka_conf_destroy(conf);
-        throw diaspora::Exception{
-            std::string{"Failed to create Kafka handle: "} + errstr};
-    }
-    auto _rk = std::shared_ptr<rd_kafka_t>{rk, rd_kafka_destroy};
-
-    // Fetch metadata for all topics
-    const rd_kafka_metadata_t *metadata;
-    rd_kafka_resp_err_t err = rd_kafka_metadata(
-        rk,          // Kafka handle
-        1,           // all_topics=1 means all topics
-        nullptr,     // no specific topic
-        &metadata,   // output pointer
-        5000         // timeout in ms
-    );
-
-    if (err != RD_KAFKA_RESP_ERR_NO_ERROR)
-        throw diaspora::Exception{
-            std::string{"Failed to get metadata: "} + rd_kafka_err2str(err)};
-
-    auto _metadata = std::shared_ptr<const rd_kafka_metadata_t>{
-        metadata, rd_kafka_metadata_destroy};
+    auto all_topics = m_admin->listAllTopics();
 
     std::unordered_map<std::string, diaspora::Metadata> result;
 
-    // Determine the prefix to match and strip for namespaced topics
-    auto ns_prefix = m_namespace.empty() ? ""s : m_namespace + ".";
-    auto info_prefix = ns_prefix + "__info_";
-
-    // Iterate through all topics
-    for (int i = 0; i < metadata->topic_cnt; i++) {
-        const rd_kafka_metadata_topic_t &topic = metadata->topics[i];
-        std::string kafka_topic_name = topic.topic;
-
-        // Skip topics that don't match our namespace prefix
-        if (!ns_prefix.empty() && kafka_topic_name.rfind(ns_prefix, 0) != 0) {
-            continue;
-        }
-
-        // Skip __info_ topics (these are internal metadata topics)
-        if (kafka_topic_name.rfind(info_prefix, 0) == 0) {
-            continue;
-        }
-
-        // Strip the namespace prefix to get the user-facing topic name
-        auto user_topic_name = ns_prefix.empty()
-            ? kafka_topic_name
-            : kafka_topic_name.substr(ns_prefix.size());
-
-        // Try to read the info topic for this topic
-        auto info_kafka_name = info_prefix + user_topic_name;
+    for (auto& topic_info : all_topics) {
+        auto info_topic_name = "__info_"s + topic_info.name;
 
         try {
-            auto info_vector = readFullTopic(info_kafka_name, m_options.json());
+            auto info_vector = m_admin->readFullTopic(info_topic_name);
             if (info_vector.size() >= 3) {
-                // We have valid metadata - construct the metadata JSON
                 nlohmann::json metadata_json;
                 metadata_json["validator"] = nlohmann::json::parse(info_vector[0]);
                 metadata_json["selector"] = nlohmann::json::parse(info_vector[1]);
                 metadata_json["serializer"] = nlohmann::json::parse(info_vector[2]);
-                metadata_json["num_partitions"] = topic.partition_cnt;
+                metadata_json["num_partitions"] = topic_info.partition_count;
 
-                result[user_topic_name] = diaspora::Metadata{metadata_json};
+                result[topic_info.name] = diaspora::Metadata{metadata_json};
             }
         } catch (...) {
-            // If we can't read the info topic, skip this topic
-            // (it might not be a Diaspora topic or the info topic doesn't exist)
             continue;
         }
     }

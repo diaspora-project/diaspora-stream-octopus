@@ -4,10 +4,12 @@
 #include <diaspora/Driver.hpp>
 #include <diaspora/PosixThreadPool.hpp>
 #include <octopus/TopicHandle.hpp>
+#include <memory>
 
 namespace octopus {
 
 class OctopusTopicHandle;
+class Admin;
 
 class OctopusDriver : public diaspora::DriverInterface,
                       public std::enable_shared_from_this<OctopusDriver> {
@@ -19,12 +21,11 @@ class OctopusDriver : public diaspora::DriverInterface,
     const diaspora::Metadata m_options;
     const std::string m_namespace;
     const bool m_disable_info_topic;
+    std::unique_ptr<Admin> m_admin;
 
-    static std::string extractNamespace(const diaspora::Metadata& options) {
-        auto& config = options.json();
-        if(config.is_object() && config.contains("namespace") && config["namespace"].is_string())
-            return config["namespace"].get<std::string>();
-        return {};
+    std::string kafkaTopicName(std::string_view name) const {
+        if(m_namespace.empty()) return std::string{name};
+        return m_namespace + "." + std::string{name};
     }
 
     static bool extractDisableInfoTopic(const diaspora::Metadata& options) {
@@ -35,17 +36,11 @@ class OctopusDriver : public diaspora::DriverInterface,
         return false;
     }
 
-    std::string kafkaTopicName(std::string_view name) const {
-        if(m_namespace.empty()) return std::string{name};
-        return m_namespace + "." + std::string{name};
-    }
-
     public:
 
-    OctopusDriver(const diaspora::Metadata& options)
-    : m_options(options)
-    , m_namespace(extractNamespace(options))
-    , m_disable_info_topic(extractDisableInfoTopic(options)) {}
+    OctopusDriver(const diaspora::Metadata& options);
+
+    ~OctopusDriver();
 
     void createTopic(std::string_view name,
                      const diaspora::Metadata& options,

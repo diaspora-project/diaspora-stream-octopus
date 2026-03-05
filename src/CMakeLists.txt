@@ -4,6 +4,7 @@ file (GLOB src-files
       "${CMAKE_CURRENT_SOURCE_DIR}/Consumer.cpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/Producer.cpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/TopicHandle.cpp"
+      "${CMAKE_CURRENT_SOURCE_DIR}/LibRdKafkaAdmin.cpp"
 )
 
 if (ENABLE_MSK)
