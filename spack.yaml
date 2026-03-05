@@ -3,7 +3,7 @@ spack:
   - cmake
   - diaspora-stream-api
   - pkg-config
-  - librdkafka
+  - librdkafka+sasl
   - uuid
   - aws-sdk-cpp
   - openssl

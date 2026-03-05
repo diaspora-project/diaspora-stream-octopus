@@ -57,3 +57,61 @@ driver = Driver(backend="octopus", options=config)
 
 IMPORTANT: In both Python and C++, `liboctopus.so` must be available in `LD_LIBRARY_PATH` for the
 Diaspora Stream API to be able to load it.
+
+## Octopus cloud service
+
+By default, the driver performs topic admin operations (create, list, exists, delete)
+directly against Kafka using librdkafka. To use the Octopus cloud service instead,
+add an `"octopus"` object to the configuration:
+
+```json
+{
+    "kafka": {
+        "bootstrap.servers": "host:port"
+    },
+    "namespace": "my-namespace",
+    "octopus": {
+        "subject": "my-subject-id",
+        "authorization": "my-auth-token",
+        "url": "https://my-octopus-service.example.com"
+    }
+}
+```
+
+When the `"octopus"` field is present, topic admin operations are routed through the
+Octopus REST API, while data-plane operations (produce, consume) still go directly
+through Kafka.
+
+### Fields
+
+| Field | Required | Description |
+|---|---|---|
+| `subject` | Yes (or `subject_env`) | The subject identifier sent in the `subject` HTTP header. |
+| `subject_env` | Yes (or `subject`) | Name of an environment variable from which to read the subject value. |
+| `authorization` | Yes (or `authorization_env`) | The authorization token sent in the `authorization` HTTP header. |
+| `authorization_env` | Yes (or `authorization`) | Name of an environment variable from which to read the authorization value. |
+| `url` | No | Base URL of the Octopus service. Defaults to the production endpoint if omitted. |
+
+For `subject` and `authorization`, you can provide the value directly or reference an
+environment variable using the `_env` variant. If both are present (e.g. both `subject`
+and `subject_env`), the `_env` variant takes priority.
+
+### Example using environment variables
+
+```json
+{
+    "kafka": {
+        "bootstrap.servers": "host:port"
+    },
+    "namespace": "my-namespace",
+    "octopus": {
+        "subject_env": "OCTOPUS_SUBJECT",
+        "authorization_env": "OCTOPUS_AUTH"
+    }
+}
+```
+
+```bash
+export OCTOPUS_SUBJECT="my-subject-id"
+export OCTOPUS_AUTH="my-auth-token"
+```
