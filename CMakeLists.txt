@@ -61,6 +61,7 @@ find_package (diaspora-stream-api REQUIRED)
 find_package (PkgConfig REQUIRED)
 pkg_check_modules (RDKAFKA REQUIRED IMPORTED_TARGET rdkafka++ rdkafka)
 pkg_check_modules (UUID REQUIRED IMPORTED_TARGET uuid)
+pkg_check_modules (CURL REQUIRED IMPORTED_TARGET libcurl)
 
 if (ENABLE_MSK)
     find_package (AWSSDK REQUIRED COMPONENTS core)

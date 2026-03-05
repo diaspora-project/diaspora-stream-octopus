@@ -5,6 +5,7 @@ file (GLOB src-files
       "${CMAKE_CURRENT_SOURCE_DIR}/Producer.cpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/TopicHandle.cpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/LibRdKafkaAdmin.cpp"
+      "${CMAKE_CURRENT_SOURCE_DIR}/OctopusAdmin.cpp"
 )
 
 if (ENABLE_MSK)
@@ -24,7 +25,7 @@ set (octopus-vers "${octopus_VERSION_MAJOR}.${octopus_VERSION_MINOR}")
 add_library (octopus ${src-files})
 target_link_libraries (octopus
     PUBLIC diaspora-stream-api PkgConfig::RDKAFKA
-    PRIVATE coverage_config warnings_config PkgConfig::UUID ${OPTIONAL_LIBRARIES})
+    PRIVATE coverage_config warnings_config PkgConfig::UUID PkgConfig::CURL ${OPTIONAL_LIBRARIES})
 target_include_directories (octopus PUBLIC $<INSTALL_INTERFACE:include>)
 target_include_directories (octopus BEFORE PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)

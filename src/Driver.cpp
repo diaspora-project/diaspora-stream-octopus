@@ -1,5 +1,6 @@
 #include "octopus/Driver.hpp"
 #include "LibRdKafkaAdmin.hpp"
+#include "OctopusAdmin.hpp"
 #include <algorithm>
 #include <iostream>
 #include <string>
@@ -21,7 +22,9 @@ OctopusDriver::OctopusDriver(const diaspora::Metadata& options)
 : m_options(options)
 , m_namespace(extractNamespace(options))
 , m_disable_info_topic(extractDisableInfoTopic(options))
-, m_admin(std::make_unique<LibRdKafkaAdmin>(options.json(), m_namespace))
+, m_admin(options.json().contains("octopus")
+    ? static_cast<std::unique_ptr<Admin>>(std::make_unique<OctopusAdmin>(options.json(), m_namespace))
+    : static_cast<std::unique_ptr<Admin>>(std::make_unique<LibRdKafkaAdmin>(options.json(), m_namespace)))
 {}
 
 OctopusDriver::~OctopusDriver() = default;
