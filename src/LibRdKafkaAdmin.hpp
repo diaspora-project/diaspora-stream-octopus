@@ -3,6 +3,8 @@
 
 #include "Admin.hpp"
 #include <nlohmann/json.hpp>
+#include <librdkafka/rdkafka.h>
+#include <memory>
 
 namespace octopus {
 
@@ -10,12 +12,16 @@ class LibRdKafkaAdmin : public Admin {
 
     nlohmann::json m_config;
     std::string m_namespace;
+    std::string m_info_topic_prefix;
+    mutable std::shared_ptr<rd_kafka_t> m_producer;
 
     std::string kafkaTopicName(std::string_view name) const;
+    rd_kafka_t* getProducer() const;
 
     public:
 
-    explicit LibRdKafkaAdmin(const nlohmann::json& config, std::string ns);
+    explicit LibRdKafkaAdmin(const nlohmann::json& config, std::string ns,
+                             std::string info_topic_prefix = "__info_");
 
     void createTopics(const std::vector<TopicSpec>& topics) const override;
 

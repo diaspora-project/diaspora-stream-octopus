@@ -116,6 +116,37 @@ static inline void applyAwsAuthIfConfigured(rd_kafka_conf_t* conf, const nlohman
 }
 
 /**
+ * @brief Immediately sets the OAUTHBEARER token on an rd_kafka_t instance.
+ * This is needed because librdkafka's automatic token refresh callback may
+ * not fire reliably for all rd_kafka_t instances in the same process.
+ */
+static inline void setAwsOauthTokenIfConfigured(rd_kafka_t* rk, const nlohmann::json& config) {
+#ifdef OCTOPUS_HAS_AWS
+    if (config.is_object() &&
+        config.contains("aws_msk_iam") &&
+        config["aws_msk_iam"].is_object()) {
+
+        const auto& aws_config = config["aws_msk_iam"];
+        if (aws_config.contains("region") && aws_config["region"].is_string()) {
+            std::string region = aws_config["region"].get<std::string>();
+            AwsMskIamSigner signer(region);
+            auto token = signer.generateToken();
+            char errstr_token[512];
+            rd_kafka_resp_err_t err = rd_kafka_oauthbearer_set_token(
+                rk, token.token.c_str(), token.expiration_ms,
+                "", nullptr, 0, errstr_token, sizeof(errstr_token));
+            if (err != RD_KAFKA_RESP_ERR_NO_ERROR)
+                throw diaspora::Exception{
+                    "Failed to set OAUTHBEARER token: " + std::string{errstr_token}};
+        }
+    }
+#else
+    (void)rk;
+    (void)config;
+#endif
+}
+
+/**
  * @brief Returns the last (high watermark) offset for a given topic.
  * This assumes the topic has exactly one partition (partition 0).
  */

@@ -21,6 +21,7 @@ class OctopusDriver : public diaspora::DriverInterface,
     const diaspora::Metadata m_options;
     const std::string m_namespace;
     const bool m_disable_info_topic;
+    const std::string m_info_topic_prefix;
     std::unique_ptr<Admin> m_admin;
 
     std::string kafkaTopicName(std::string_view name) const {
@@ -34,6 +35,18 @@ class OctopusDriver : public diaspora::DriverInterface,
         && config["disable_info_topic"].is_boolean())
             return config["disable_info_topic"].get<bool>();
         return false;
+    }
+
+    static std::string extractInfoTopicPrefix(const diaspora::Metadata& options) {
+        auto& config = options.json();
+        if(config.is_object() && config.contains("info_topic_prefix")
+        && config["info_topic_prefix"].is_string())
+            return config["info_topic_prefix"].get<std::string>();
+        // Default: "info_" for OctopusAdmin (REST API rejects names starting
+        // with underscores), "__info_" for direct Kafka (LibRdKafkaAdmin).
+        if(config.is_object() && config.contains("octopus"))
+            return "info_";
+        return "__info_";
     }
 
     public:

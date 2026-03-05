@@ -17,9 +17,11 @@ static size_t writeCallback(char* ptr, size_t size, size_t nmemb, void* userdata
     return size * nmemb;
 }
 
-OctopusAdmin::OctopusAdmin(const nlohmann::json& config, std::string ns)
+OctopusAdmin::OctopusAdmin(const nlohmann::json& config, std::string ns,
+                           std::string info_topic_prefix)
 : m_namespace(std::move(ns))
-, m_kafka_admin(config, m_namespace)
+, m_info_topic_prefix(std::move(info_topic_prefix))
+, m_kafka_admin(config, m_namespace, m_info_topic_prefix)
 {
     if(!config.contains("octopus") || !config["octopus"].is_object())
         throw diaspora::Exception{"OctopusAdmin requires an \"octopus\" object in the configuration"};
@@ -113,8 +115,8 @@ std::vector<std::string> OctopusAdmin::fetchTopicsForNamespace() const {
     for(auto& t : topics_json) {
         if(!t.is_string()) continue;
         auto name = t.get<std::string>();
-        // Filter out __info_ topics
-        if(name.rfind("__info_", 0) == 0) continue;
+        // Filter out info topics
+        if(name.rfind(m_info_topic_prefix, 0) == 0) continue;
         topics.push_back(std::move(name));
     }
     return topics;

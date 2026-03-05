@@ -14,6 +14,7 @@ class OctopusAdmin : public Admin {
     std::string m_subject;
     std::string m_authorization;
     std::string m_namespace;
+    std::string m_info_topic_prefix;
     LibRdKafkaAdmin m_kafka_admin;
 
     std::string performRequest(const std::string& method, const std::string& path) const;
@@ -21,7 +22,8 @@ class OctopusAdmin : public Admin {
 
     public:
 
-    OctopusAdmin(const nlohmann::json& config, std::string ns);
+    OctopusAdmin(const nlohmann::json& config, std::string ns,
+                 std::string info_topic_prefix = "info_");
 
     void createTopics(const std::vector<TopicSpec>& topics) const override;
 

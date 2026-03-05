@@ -1,11 +1,20 @@
 #include "AwsMskIamSigner.hpp"
 
+#include <aws/core/Aws.h>
 #include <aws/core/client/ClientConfiguration.h>
 #include <aws/core/utils/DateTime.h>
 
 #include <openssl/evp.h>
 #include <openssl/buffer.h>
 #include <cstring>
+
+static void ensureAwsSdkInitialized() {
+    static struct AwsSdkGuard {
+        Aws::SDKOptions options;
+        AwsSdkGuard() { Aws::InitAPI(options); }
+        ~AwsSdkGuard() { Aws::ShutdownAPI(options); }
+    } guard;
+}
 
 static std::string base64UrlEncode(const std::string &input)
 {
@@ -41,6 +50,7 @@ static std::string base64UrlEncode(const std::string &input)
 AwsMskIamSigner::AwsMskIamSigner(const std::string &region, int64_t expiration_seconds)
     : url("https://kafka." + region + ".amazonaws.com/"), expiration_seconds(expiration_seconds)
 {
+    ensureAwsSdkInitialized();
 
     Aws::Client::ClientConfiguration config;
     config.region = region;

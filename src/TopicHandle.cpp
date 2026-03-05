@@ -40,6 +40,7 @@ OctopusTopicHandle::makeProducer(std::string_view name,
         throw diaspora::Exception{"Could not create rd_kafka_t instance: " + std::string{errstr}};
     }
     auto _rk = std::shared_ptr<rd_kafka_t>{rk, rd_kafka_destroy};
+    setAwsOauthTokenIfConfigured(rk, m_driver->m_options.json());
 
     return std::make_shared<OctopusProducer>(
             std::string{name}, batch_size, max_batch, ordering, thread_pool,
@@ -105,6 +106,7 @@ OctopusTopicHandle::makeConsumer(std::string_view name,
             "Could not create rd_kafka_t instance: " + std::string{errstr}};
     }
     auto _rk = std::shared_ptr<rd_kafka_t>{rk, rd_kafka_destroy};
+    setAwsOauthTokenIfConfigured(rk, m_driver->m_options.json());
 
     // Subscribe
     if (rd_kafka_subscribe(rk, topic_list.get()) != RD_KAFKA_RESP_ERR_NO_ERROR) {

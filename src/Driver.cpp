@@ -22,9 +22,10 @@ OctopusDriver::OctopusDriver(const diaspora::Metadata& options)
 : m_options(options)
 , m_namespace(extractNamespace(options))
 , m_disable_info_topic(extractDisableInfoTopic(options))
+, m_info_topic_prefix(extractInfoTopicPrefix(options))
 , m_admin(options.json().contains("octopus")
-    ? static_cast<std::unique_ptr<Admin>>(std::make_unique<OctopusAdmin>(options.json(), m_namespace))
-    : static_cast<std::unique_ptr<Admin>>(std::make_unique<LibRdKafkaAdmin>(options.json(), m_namespace)))
+    ? static_cast<std::unique_ptr<Admin>>(std::make_unique<OctopusAdmin>(options.json(), m_namespace, m_info_topic_prefix))
+    : static_cast<std::unique_ptr<Admin>>(std::make_unique<LibRdKafkaAdmin>(options.json(), m_namespace, m_info_topic_prefix)))
 {}
 
 OctopusDriver::~OctopusDriver() = default;
@@ -81,13 +82,13 @@ void OctopusDriver::createTopic(std::string_view name,
     std::vector<Admin::TopicSpec> topic_specs;
     topic_specs.push_back({std::string{name}, num_partitions, replication_factor});
     if(!disable_info_topic) {
-        topic_specs.push_back({"__info_"s + std::string{name}, 1, replication_factor});
+        topic_specs.push_back({m_info_topic_prefix + std::string{name}, 1, replication_factor});
     }
 
     m_admin->createTopics(topic_specs);
 
     if(!disable_info_topic) {
-        auto info_topic_name = "__info_"s + std::string{name};
+        auto info_topic_name = m_info_topic_prefix + std::string{name};
 
         std::vector<std::string> messages;
         messages.push_back(validator->metadata().json().dump());
@@ -105,7 +106,7 @@ std::shared_ptr<diaspora::TopicHandleInterface> OctopusDriver::openTopic(
         throw diaspora::Exception{std::string{"Topic \""} + std::string{name} + "\" not found"};
 
     auto kafka_name = kafkaTopicName(name);
-    auto info_topic_name = "__info_"s + std::string{name};
+    auto info_topic_name = m_info_topic_prefix + std::string{name};
 
     // Get info from topic
     diaspora::Validator validator;
@@ -158,7 +159,7 @@ std::unordered_map<std::string, diaspora::Metadata> OctopusDriver::listTopics() 
     std::unordered_map<std::string, diaspora::Metadata> result;
 
     for (auto& topic_info : all_topics) {
-        auto info_topic_name = "__info_"s + topic_info.name;
+        auto info_topic_name = m_info_topic_prefix + topic_info.name;
 
         try {
             auto info_vector = m_admin->readFullTopic(info_topic_name);

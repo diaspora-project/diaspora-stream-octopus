@@ -3,7 +3,7 @@
 #include "KafkaHelper.hpp"
 #include <diaspora/Exception.hpp>
 #include <librdkafka/rdkafka.h>
-#include <uuid.h>
+#include <chrono>
 #include <future>
 #include <memory>
 
@@ -71,9 +71,28 @@ static void adminBackgroundCb(rd_kafka_t* /*rk*/, rd_kafka_event_t* rkev, void* 
     promise->set_value(std::move(result));
 }
 
-LibRdKafkaAdmin::LibRdKafkaAdmin(const nlohmann::json& config, std::string ns)
+LibRdKafkaAdmin::LibRdKafkaAdmin(const nlohmann::json& config, std::string ns,
+                                 std::string info_topic_prefix)
 : m_config(config)
-, m_namespace(std::move(ns)) {}
+, m_namespace(std::move(ns))
+, m_info_topic_prefix(std::move(info_topic_prefix)) {}
+
+rd_kafka_t* LibRdKafkaAdmin::getProducer() const {
+    if (m_producer) return m_producer.get();
+    char errstr[512];
+    KafkaConf kconf{m_config["kafka"]};
+    auto conf = kconf.dup();
+    applyAwsAuthIfConfigured(conf, m_config);
+    auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
+    if (!rk) {
+        rd_kafka_conf_destroy(conf);
+        throw diaspora::Exception{
+            "Could not create rd_kafka_t instance: " + std::string{errstr}};
+    }
+    m_producer = std::shared_ptr<rd_kafka_t>{rk, rd_kafka_destroy};
+    setAwsOauthTokenIfConfigured(rk, m_config);
+    return rk;
+}
 
 std::string LibRdKafkaAdmin::kafkaTopicName(std::string_view name) const {
     if(m_namespace.empty()) return std::string{name};
@@ -94,6 +113,7 @@ void LibRdKafkaAdmin::createTopics(const std::vector<TopicSpec>& topics) const {
         throw diaspora::Exception{"Could not create rd_kafka_t instance: " + std::string{errstr}};
     }
     auto _rk = std::shared_ptr<rd_kafka_t>{rk, rd_kafka_destroy};
+    setAwsOauthTokenIfConfigured(rk, m_config);
 
     // Create NewTopic objects
     std::vector<rd_kafka_NewTopic_t*> new_topics;
@@ -159,6 +179,7 @@ bool LibRdKafkaAdmin::topicExists(std::string_view name) const {
         throw diaspora::Exception{"Could not create rd_kafka_t instance: " + std::string{errstr}};
     }
     auto _rk = std::shared_ptr<rd_kafka_t>{rk, rd_kafka_destroy};
+    setAwsOauthTokenIfConfigured(rk, m_config);
 
     std::promise<AdminResult> promise;
     auto future = promise.get_future();
@@ -197,28 +218,17 @@ bool LibRdKafkaAdmin::topicExists(std::string_view name) const {
 
 size_t LibRdKafkaAdmin::getPartitionCount(std::string_view name) const {
     auto kafka_name = kafkaTopicName(name);
-    char errstr[512];
+    auto rk = getProducer();
 
-    KafkaConf kconf{m_config["kafka"]};
-    auto conf = kconf.dup();
-    applyAwsAuthIfConfigured(conf, m_config);
-
-    auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
-    if (!rk) {
-        rd_kafka_conf_destroy(conf);
+    auto rkt = rd_kafka_topic_new(rk, kafka_name.c_str(), nullptr);
+    if (!rkt)
         throw diaspora::Exception{
-            std::string{"Failed to create Kafka handle: "} + errstr};
-    }
-    auto _rk = std::shared_ptr<rd_kafka_s>{rk, rd_kafka_destroy};
+            std::string{"Failed to create topic handle: "} + rd_kafka_err2str(rd_kafka_last_error())};
+    auto _rkt = std::shared_ptr<rd_kafka_topic_s>{rkt, rd_kafka_topic_destroy};
 
     const rd_kafka_metadata_t *metadata;
     rd_kafka_resp_err_t err = rd_kafka_metadata(
-        rk,
-        0,
-        rd_kafka_topic_new(rk, kafka_name.c_str(), nullptr),
-        &metadata,
-        60000
-    );
+        rk, 0, rkt, &metadata, 60000);
 
     if (err != RD_KAFKA_RESP_ERR_NO_ERROR)
         throw diaspora::Exception{
@@ -227,34 +237,20 @@ size_t LibRdKafkaAdmin::getPartitionCount(std::string_view name) const {
     auto _metadata = std::shared_ptr<const rd_kafka_metadata_t>{
         metadata, rd_kafka_metadata_destroy};
 
-    if (metadata->topic_cnt == 0) {
+    if (metadata->topic_cnt == 0)
         throw diaspora::Exception{
             std::string{"Topic \""} + std::string{name} + "\" not found"};
-    }
 
     const rd_kafka_metadata_topic_t &topic = metadata->topics[0];
-    if (topic.err != RD_KAFKA_RESP_ERR_NO_ERROR) {
+    if (topic.err != RD_KAFKA_RESP_ERR_NO_ERROR)
         throw diaspora::Exception{
             std::string{"Topic metadata error: "} + rd_kafka_err2str(topic.err)};
-    }
 
     return topic.partition_cnt;
 }
 
 std::vector<TopicInfo> LibRdKafkaAdmin::listAllTopics() const {
-    char errstr[512];
-
-    KafkaConf kconf{m_config["kafka"]};
-    auto conf = kconf.dup();
-    applyAwsAuthIfConfigured(conf, m_config);
-
-    auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
-    if (!rk) {
-        rd_kafka_conf_destroy(conf);
-        throw diaspora::Exception{
-            std::string{"Failed to create Kafka handle: "} + errstr};
-    }
-    auto _rk = std::shared_ptr<rd_kafka_t>{rk, rd_kafka_destroy};
+    auto rk = getProducer();
 
     const rd_kafka_metadata_t *metadata;
     rd_kafka_resp_err_t err = rd_kafka_metadata(
@@ -270,7 +266,7 @@ std::vector<TopicInfo> LibRdKafkaAdmin::listAllTopics() const {
     std::vector<TopicInfo> result;
 
     auto ns_prefix = m_namespace.empty() ? ""s : m_namespace + ".";
-    auto info_prefix = ns_prefix + "__info_";
+    auto info_prefix = ns_prefix + m_info_topic_prefix;
 
     for (int i = 0; i < metadata->topic_cnt; i++) {
         const rd_kafka_metadata_topic_t &topic = metadata->topics[i];
@@ -300,18 +296,7 @@ std::vector<TopicInfo> LibRdKafkaAdmin::listAllTopics() const {
 void LibRdKafkaAdmin::produceMessages(std::string_view topic,
                                       const std::vector<std::string>& messages) const {
     auto kafka_name = kafkaTopicName(topic);
-    char errstr[512];
-
-    KafkaConf kconf{m_config["kafka"]};
-    auto conf = kconf.dup();
-    applyAwsAuthIfConfigured(conf, m_config);
-
-    auto rk = rd_kafka_new(RD_KAFKA_PRODUCER, conf, errstr, sizeof(errstr));
-    if (!rk) {
-        rd_kafka_conf_destroy(conf);
-        throw diaspora::Exception{"Could not create rd_kafka_t instance: " + std::string{errstr}};
-    }
-    auto _rk = std::shared_ptr<rd_kafka_t>{rk, rd_kafka_destroy};
+    auto rk = getProducer();
 
     for (auto& msg : messages) {
         rd_kafka_resp_err_t err = rd_kafka_producev(
@@ -333,18 +318,23 @@ void LibRdKafkaAdmin::produceMessages(std::string_view topic,
 
 std::vector<std::string> LibRdKafkaAdmin::readFullTopic(std::string_view name) const {
     auto kafka_name = kafkaTopicName(name);
+    auto producer = getProducer();
+
+    // Query watermark offsets to find out how many messages are in the topic
+    int64_t low, high;
+    rd_kafka_resp_err_t err = rd_kafka_query_watermark_offsets(
+        producer, kafka_name.c_str(), 0, &low, &high, 10000);
+    if (err != RD_KAFKA_RESP_ERR_NO_ERROR)
+        throw diaspora::Exception{
+            "Failed to query offsets for " + kafka_name + ": " + rd_kafka_err2str(err)};
+    if (high <= 0)
+        return {};
+
+    // Create a consumer to read the messages using the simple (legacy) API.
+    // We manually set the OAUTHBEARER token since the automatic callback
+    // may not fire for subsequent rd_kafka_t instances in the same process.
     char errstr[512];
-
     KafkaConf conf{m_config["kafka"]};
-    uuid_t consumer_uuid;
-    uuid_generate(consumer_uuid);
-    char group_id[37] = {0};
-    uuid_unparse(consumer_uuid, group_id);
-    conf["group.id"] = std::string{"info-consurmer-"} + group_id;
-    conf["auto.offset.reset"] = "earliest";
-    conf["topic.metadata.refresh.interval.ms"] = "10000";
-    conf["enable.partition.eof"] = "true";
-
     auto kconf = conf.dup();
     applyAwsAuthIfConfigured(kconf, m_config);
 
@@ -355,52 +345,41 @@ std::vector<std::string> LibRdKafkaAdmin::readFullTopic(std::string_view name) c
             "Could not create rd_kafka_t instance: " + std::string{errstr}};
     }
     auto _consumer = std::shared_ptr<rd_kafka_t>{consumer, rd_kafka_destroy};
+    setAwsOauthTokenIfConfigured(consumer, m_config);
 
-    auto info_topic = rd_kafka_topic_new(consumer, kafka_name.data(), nullptr);
-    if (!info_topic)
+    auto rkt = rd_kafka_topic_new(consumer, kafka_name.c_str(), nullptr);
+    if (!rkt)
         throw diaspora::Exception{
-            "Failed to create topic object: " + std::string{rd_kafka_err2str(rd_kafka_last_error())}};
-    auto _info_topic = std::shared_ptr<rd_kafka_topic_t>{info_topic, rd_kafka_topic_destroy};
+            "Failed to create topic handle: " + std::string{rd_kafka_err2str(rd_kafka_last_error())}};
+    auto _rkt = std::shared_ptr<rd_kafka_topic_s>{rkt, rd_kafka_topic_destroy};
 
-    auto topic_partition_list = rd_kafka_topic_partition_list_new(1);
-    if (!topic_partition_list)
+    if (rd_kafka_consume_start(rkt, 0, RD_KAFKA_OFFSET_BEGINNING) == -1)
         throw diaspora::Exception{
-            "Failed to create topic partition list: " + std::string{rd_kafka_err2str(rd_kafka_last_error())}};
-    auto _topic_partition_list = std::shared_ptr<rd_kafka_topic_partition_list_t>{
-        topic_partition_list,
-        rd_kafka_topic_partition_list_destroy};
-
-    rd_kafka_topic_partition_list_add(
-        topic_partition_list, kafka_name.data(), RD_KAFKA_PARTITION_UA);
-
-    rd_kafka_resp_err_t err = rd_kafka_subscribe(consumer, topic_partition_list);
-    if (err)
-        throw diaspora::Exception{
-            "Failed to subscribe to topic: " + std::string{rd_kafka_err2str(err)}};
+            "Failed to start consuming: " + std::string{rd_kafka_err2str(rd_kafka_last_error())}};
 
     std::vector<std::string> result;
+    auto start = std::chrono::steady_clock::now();
+    constexpr auto max_duration = std::chrono::seconds(30);
 
-    rd_kafka_message_t *message;
-    while (true) {
-        message = rd_kafka_consumer_poll(consumer, 1000);
+    while (static_cast<int64_t>(result.size()) < high) {
+        auto message = rd_kafka_consume(rkt, 0, 1000);
         if (message) {
             auto _message = std::shared_ptr<rd_kafka_message_t>{message, rd_kafka_message_destroy};
             if (message->err) {
-                if (message->err == RD_KAFKA_RESP_ERR__PARTITION_EOF) {
+                if (message->err == RD_KAFKA_RESP_ERR__PARTITION_EOF)
                     break;
-                } else {
-                    throw diaspora::Exception{
-                        "Consumer error: " + std::string{rd_kafka_message_errstr(message)}};
-                }
-            } else {
-                result.emplace_back(static_cast<char*>(message->payload), message->len);
+                throw diaspora::Exception{
+                    "Consumer error: " + std::string{rd_kafka_message_errstr(message)}};
             }
+            result.emplace_back(static_cast<char*>(message->payload), message->len);
         } else {
-            continue;
+            if (std::chrono::steady_clock::now() - start > max_duration)
+                throw diaspora::Exception{
+                    "Timed out reading topic " + kafka_name};
         }
     }
 
-    rd_kafka_unsubscribe(consumer);
+    rd_kafka_consume_stop(rkt, 0);
 
     return result;
 }
